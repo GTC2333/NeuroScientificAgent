@@ -23,9 +23,12 @@ class ClaudeCodeService:
     def __init__(self, project_dir: str = None):
         config = get_config()
 
-        # Use config values, with fallbacks
-        self.project_dir = project_dir or str(PROJECT_ROOT)
-        self.claude_dir = Path(config.project.claude_dir)
+        # Use temp_workspace as default project directory
+        project_root = Path(__file__).parent.parent.parent.parent
+        default_workspace = project_root / config.workspace.temp_dir
+
+        self.project_dir = project_dir or str(default_workspace)
+        self.claude_dir = Path(config.project.claude_dir).resolve()
         self.claude_cli = os.path.expanduser(config.claude.cli_path)
         self.timeout = config.claude.timeout
         self.default_model = config.claude.model

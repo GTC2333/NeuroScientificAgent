@@ -34,10 +34,18 @@ class ProjectConfig:
 
 
 @dataclass
+class WorkspaceConfig:
+    temp_dir: str = "temp_workspace"
+    work_dir: str = "temp_workspace/work"
+    logs_dir: str = "temp_workspace/logs"
+
+
+@dataclass
 class Config:
     server: ServerConfig
     claude: ClaudeConfig
     project: ProjectConfig
+    workspace: WorkspaceConfig
 
 
 def load_config() -> Config:
@@ -67,8 +75,9 @@ def load_config() -> Config:
     server_cfg = ServerConfig(**config_data.get('server', {}))
     claude_cfg = ClaudeConfig(**config_data.get('claude', {}))
     project_cfg = ProjectConfig(**config_data.get('project', {}))
+    workspace_cfg = WorkspaceConfig(**config_data.get('workspace', {}))
 
-    return Config(server=server_cfg, claude=claude_cfg, project=project_cfg)
+    return Config(server=server_cfg, claude=claude_cfg, project=project_cfg, workspace=workspace_cfg)
 
 
 def get_config() -> Config:
