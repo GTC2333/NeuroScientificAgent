@@ -1,0 +1,17 @@
+# MAS - Multi-Agent Scientific Operating System
+# Default configuration (this file is committed to git)
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+claude:
+  cli_path: "~/.local/bin/claude"
+  model: "sonnet"
+  timeout: 120
+
+project:
+  root_dir: "."
+  claude_dir: ".claude"
+  agents_dir: ".claude/agents"
+  skills_dir: ".claude/skills"
