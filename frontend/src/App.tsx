@@ -1,23 +1,31 @@
-import { useState } from 'react';
+import { useStore } from './store/useStore';
+import type { SessionStore } from './store/useStore';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { ChatWindow } from './components/ChatWindow';
-import { TaskPanel } from './components/TaskPanel';
-import type { AgentType } from './types';
+import { SessionCreationPanel } from './components/SessionCreationPanel';
+import { InspectorPanel } from './components/InspectorPanel';
 
 function App() {
-  const [currentAgent, setCurrentAgent] = useState<AgentType>('principal');
+  const currentSessionId = useStore((state: SessionStore) => state.currentSessionId);
 
   return (
-    <div className="h-screen flex flex-col">
-      <Header currentAgent={currentAgent} onAgentChange={setCurrentAgent} />
+    <div className="h-screen flex flex-col bg-gray-50">
+      <Header />
 
       <div className="flex-1 flex overflow-hidden">
         <Sidebar />
 
-        <ChatWindow agentType={currentAgent} />
-
-        <TaskPanel />
+        <main className="flex-1 flex">
+          {currentSessionId ? (
+            <div className="flex-1 flex">
+              <ChatWindow />
+              <InspectorPanel />
+            </div>
+          ) : (
+            <SessionCreationPanel />
+          )}
+        </main>
       </div>
     </div>
   );
