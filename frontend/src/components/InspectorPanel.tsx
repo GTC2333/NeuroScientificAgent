@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { GraphTab } from './tabs/GraphTab';
 import { AgentsTab } from './tabs/AgentsTab';
 import { FilesTab } from './tabs/FilesTab';
+import { LogsTab } from './tabs/LogsTab';
 
 type Tab = 'graph' | 'agents' | 'files' | 'logs';
 
@@ -54,9 +55,7 @@ export function InspectorPanel() {
         {activeTab === 'graph' && <GraphTab />}
         {activeTab === 'agents' && <AgentsTab />}
         {activeTab === 'files' && <FilesTab />}
-        {activeTab === 'logs' && (
-          <div className="text-gray-400 text-sm">{activeTab} content</div>
-        )}
+        {activeTab === 'logs' && <LogsTab />}
       </div>
     </div>
   );
