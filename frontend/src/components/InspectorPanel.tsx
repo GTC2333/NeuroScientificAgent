@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { GraphTab } from './tabs/GraphTab';
 import { AgentsTab } from './tabs/AgentsTab';
+import { FilesTab } from './tabs/FilesTab';
 
 type Tab = 'graph' | 'agents' | 'files' | 'logs';
 
@@ -52,7 +53,8 @@ export function InspectorPanel() {
       <div className="flex-1 overflow-auto p-4">
         {activeTab === 'graph' && <GraphTab />}
         {activeTab === 'agents' && <AgentsTab />}
-        {activeTab !== 'graph' && activeTab !== 'agents' && (
+        {activeTab === 'files' && <FilesTab />}
+        {activeTab === 'logs' && (
           <div className="text-gray-400 text-sm">{activeTab} content</div>
         )}
       </div>
