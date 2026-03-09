@@ -5,12 +5,16 @@ Claude Code Service - Invokes Claude Code CLI for agent responses
 import subprocess
 import json
 import os
+import logging
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator, List, Optional
 import asyncio
 import os.path
+import warnings
 
 from src.config import get_config
+
+logger = logging.getLogger("MAS.ClaudeCode")
 
 # Path to the project .claude directory
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -32,6 +36,24 @@ class ClaudeCodeService:
         self.claude_cli = os.path.expanduser(config.claude.cli_path)
         self.timeout = config.claude.timeout
         self.default_model = config.claude.model
+        self.api_key = config.claude.api_key
+
+    def _load_settings_env(self) -> dict:
+        """Load environment variables from settings.local.json"""
+        settings_file = self.claude_dir / "settings.local.json"
+        env_vars = {}
+
+        if settings_file.exists():
+            try:
+                with open(settings_file, 'r') as f:
+                    settings = json.load(f)
+                    if "env" in settings:
+                        env_vars = settings["env"]
+                        logger.info(f"[ClaudeCode] Loaded {len(env_vars)} env vars from settings.local.json")
+            except Exception as e:
+                logger.warning(f"[ClaudeCode] Failed to load settings.local.json: {e}")
+
+        return env_vars
 
     def _load_agent_prompt(self, agent_type: str) -> str:
         """Load agent definition from .claude/agents/"""
@@ -41,10 +63,16 @@ class ClaudeCodeService:
             return agent_file.read_text()
         return ""
 
-    def _build_system_prompt(self, agent_type: str, message: str) -> str:
+    def _build_system_prompt(self, agent_type: str, message: str, skills: List[str] = None) -> str:
         """Build the full prompt for Claude Code"""
         # Load agent definition
         agent_def = self._load_agent_prompt(agent_type)
+
+        # Build skills context
+        skills_context = ""
+        if skills:
+            skills_list = ", ".join(skills)
+            skills_context = f"\n## Active Skills\nYou have access to the following skills: {skills_list}"
 
         # Build system prompt with MAS context
         system_prompt = f"""You are running in the Multi-Agent Scientific (MAS) Operating System.
@@ -54,6 +82,7 @@ Your role is: {agent_type.upper()}
 
 ## Current Task
 User message: {message}
+{skills_context}
 
 ## Instructions
 1. Respond as the {agent_type} agent following its defined cognitive style
@@ -66,23 +95,58 @@ Respond now as the {agent_type} agent:"""
         return system_prompt
 
     def invoke(self, message: str, agent_type: str = "principal",
-               model: str = None) -> str:
+               model: str = None, session_id: str = None,
+               skills: List[str] = None) -> str:
         """Invoke Claude Code CLI and return response"""
         model = model or self.default_model
 
-        system_prompt = self._build_system_prompt(agent_type, message)
+        system_prompt = self._build_system_prompt(agent_type, message, skills)
 
         cmd = [
             self.claude_cli,
             "-p",
             "--print",
+            "--dangerously-skip-permissions",
             "--output-format", "text",
             "--add-dir", str(self.claude_dir),
             "--setting-sources", "project",
             "--model", model,
             "--system-prompt", system_prompt,
-            message
         ]
+
+        # Add session_id flag for Global Memory
+        if session_id:
+            cmd.extend(["--session-id", session_id])
+
+        # Message must be the last argument
+        cmd.append(message)
+
+        logger.info(f"[ClaudeCode] ===== INVOCATION DETAILS =====")
+        logger.info(f"[ClaudeCode] CLI path: {self.claude_cli}")
+        logger.info(f"[ClaudeCode] Project dir: {self.project_dir}")
+        logger.info(f"[ClaudeCode] Claude dir: {self.claude_dir}")
+        logger.info(f"[ClaudeCode] Model: {model}")
+        logger.info(f"[ClaudeCode] Agent type: {agent_type}")
+        logger.info(f"[ClaudeCode] Skills: {skills}")
+        logger.info(f"[ClaudeCode] Full command: {cmd}")
+        logger.info(f"[ClaudeCode] Message: {message[:100]}...")
+
+        # Prepare environment: start with current env, then load from settings.local.json
+        env = os.environ.copy()
+
+        # Load settings from settings.local.json (third-party API config)
+        settings_env = self._load_settings_env()
+        env.update(settings_env)
+
+        # Override with explicit API key if provided in local.yaml
+        if self.api_key:
+            env["ANTHROPIC_API_KEY"] = self.api_key
+
+        # which API/endpoint is being Log used
+        if env.get("ANTHROPIC_BASE_URL"):
+            logger.info(f"[ClaudeCode] Using third-party API: {env.get('ANTHROPIC_BASE_URL')}")
+        if env.get("ANTHROPIC_MODEL"):
+            logger.info(f"[ClaudeCode] Model: {env.get('ANTHROPIC_MODEL')}")
 
         try:
             result = subprocess.run(
@@ -90,29 +154,46 @@ Respond now as the {agent_type} agent:"""
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
-                cwd=self.project_dir
+                cwd=self.project_dir,
+                env=env
             )
 
+            logger.info(f"[ClaudeCode] Return code: {result.returncode}")
+            logger.info(f"[ClaudeCode] Stdout length: {len(result.stdout)}")
+            logger.info(f"[ClaudeCode] Stderr length: {len(result.stderr)}")
+
+            # 详细打印 stdout 和 stderr 内容（用于调试）
             if result.returncode != 0:
-                error_msg = result.stderr or "Unknown error"
-                # Filter out zprofile warnings
+                logger.error(f"[ClaudeCode] ===== ERROR DETAILS =====")
+                logger.error(f"[ClaudeCode] Return code: {result.returncode}")
+                logger.error(f"[ClaudeCode] Stdout (first 500 chars): {result.stdout[:500] if result.stdout else '(empty)'}")
+                logger.error(f"[ClaudeCode] Stderr (first 500 chars): {result.stderr[:500] if result.stderr else '(empty)'}")
+
+                # 尝试从 stdout 获取错误信息（因为 stderr 可能为空）
+                error_msg = result.stderr or result.stdout or "Unknown error"
+                # 过滤掉 zprofile 警告
                 error_lines = [l for l in error_msg.split('\n')
-                              if 'zprofile' not in l and 'brew' not in l]
-                return f"Error: {' '.join(error_lines)}"
+                              if 'zprofile' not in l.lower() and 'brew' not in l.lower() and l.strip()]
+                error_text = f"Error: {' '.join(error_lines)}"
+                logger.error(f"[ClaudeCode] CLI Error: {error_text}")
+                return error_text
 
             return result.stdout.strip()
 
         except subprocess.TimeoutExpired:
+            logger.error("[ClaudeCode] Request timed out")
             return "Error: Request timed out (120s limit)"
         except Exception as e:
+            logger.error(f"[ClaudeCode] Exception: {str(e)}", exc_info=True)
             return f"Error: {str(e)}"
 
     def invoke_streaming(self, message: str, agent_type: str = "principal",
-                          model: str = None) -> Generator[str, None, None]:
+                          model: str = None, session_id: str = None,
+                          skills: List[str] = None) -> Generator[str, None, None]:
         """Invoke Claude Code CLI with streaming output"""
         model = model or self.default_model
 
-        system_prompt = self._build_system_prompt(agent_type, message)
+        system_prompt = self._build_system_prompt(agent_type, message, skills)
 
         cmd = [
             self.claude_cli,
@@ -124,8 +205,21 @@ Respond now as the {agent_type} agent:"""
             "--setting-sources", "project",
             "--model", model,
             "--system-prompt", system_prompt,
-            message
         ]
+
+        # Add session_id flag for Global Memory
+        if session_id:
+            cmd.extend(["--session-id", session_id])
+
+        # Message must be the last argument
+        cmd.append(message)
+
+        # Prepare environment: load from settings.local.json
+        env = os.environ.copy()
+        settings_env = self._load_settings_env()
+        env.update(settings_env)
+        if self.api_key:
+            env["ANTHROPIC_API_KEY"] = self.api_key
 
         try:
             process = subprocess.Popen(
@@ -133,7 +227,8 @@ Respond now as the {agent_type} agent:"""
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                cwd=self.project_dir
+                cwd=self.project_dir,
+                env=env
             )
 
             buffer = ""
