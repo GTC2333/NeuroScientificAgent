@@ -1,53 +1,24 @@
 import { useState } from 'react';
 
-interface FileItem {
-  name: string;
-  type: 'file' | 'folder';
-  size?: number;
-  modified?: string;
-}
-
 export function FilesTab() {
-  const [files] = useState<FileItem[]>([
-    { name: 'research/', type: 'folder' },
-    { name: 'experiments/', type: 'folder' },
-    { name: 'analysis/', type: 'folder' },
-    { name: 'config.yaml', type: 'file', size: 1024, modified: '2024-01-15' },
-    { name: 'results.json', type: 'file', size: 2048, modified: '2024-01-15' },
-  ]);
-  const [currentPath, setCurrentPath] = useState<string[]>([]);
-
-  const getIcon = (type: string) => {
-    return type === 'folder' ? '📁' : '📄';
-  };
-
   return (
-    <div className="space-y-2">
-      {/* Breadcrumb */}
-      <div className="text-xs text-gray-500 flex gap-1">
-        <button onClick={() => setCurrentPath([])} className="hover:text-blue-600">
-          root
-        </button>
-        {currentPath.map((segment, i) => (
-          <span key={i}>
-            /<button onClick={() => setCurrentPath(currentPath.slice(0, i + 1))} className="hover:text-blue-600">{segment}</button>
-          </span>
-        ))}
+    <div className="p-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+        <h3 className="font-medium text-blue-800 mb-2">文件操作</h3>
+        <p className="text-sm text-blue-700">
+          文件操作已集成到 Claude Code 工具中。
+        </p>
+        <ul className="text-sm text-blue-600 mt-2 space-y-1">
+          <li>• <code>Read</code> - 读取文件内容</li>
+          <li>• <code>Glob</code> - 搜索文件</li>
+          <li>• <code>Grep</code> - 文件内容搜索</li>
+          <li>• <code>Edit</code> - 编辑文件</li>
+          <li>• <code>Write</code> - 写入文件</li>
+        </ul>
       </div>
-
-      {/* File list */}
-      <div className="space-y-1">
-        {files.map((file) => (
-          <div
-            key={file.name}
-            className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded cursor-pointer"
-          >
-            <span>{getIcon(file.type)}</span>
-            <span className="flex-1 text-sm text-gray-700">{file.name}</span>
-            {file.size && <span className="text-xs text-gray-400">{file.size}B</span>}
-          </div>
-        ))}
-      </div>
+      <p className="text-xs text-gray-500">
+        请在聊天窗口中使用以上工具进行文件操作。
+      </p>
     </div>
   );
 }
