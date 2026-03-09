@@ -7,7 +7,6 @@ export function Sidebar() {
   const currentSessionId = useStore((state: SessionStore) => state.currentSessionId);
   const createSession = useStore((state: SessionStore) => state.createSession);
   const deleteSession = useStore((state: SessionStore) => state.deleteSession);
-  const setCurrentSession = useStore((state: SessionStore) => state.setCurrentSession);
   const navigate = useNavigate();
 
   const handleNewSession = () => {

@@ -1,5 +1,3 @@
-import { useState } from 'react';
-
 export function FilesTab() {
   return (
     <div className="p-4">

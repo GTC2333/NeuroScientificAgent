@@ -33,11 +33,6 @@ export function LogsTab() {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
-  const handleClear = async () => {
-    await api.clearLogs();
-    setLogs([]);
-  };
-
   const levelColors: Record<LogLevel, string> = {
     info: 'text-blue-600',
     warn: 'text-yellow-600',
