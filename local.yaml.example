@@ -1,0 +1,7 @@
+# Local configuration (DO NOT COMMIT - contains API key)
+# Copy this file to local.yaml and add your API key
+
+claude:
+  # Get your API key from https://console.anthropic.com/
+  # Format: sk-ant-api03-xxxxx...
+  api_key: "your-api-key-here"

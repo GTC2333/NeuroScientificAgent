@@ -1,0 +1,9 @@
+# Ignore everything
+*
+
+# But not these
+!backend/src/services/
+!.claude/
+!config.yaml
+!sandbox/
+!docker/requirements.txt

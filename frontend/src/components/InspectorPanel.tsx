@@ -3,8 +3,10 @@ import { GraphTab } from './tabs/GraphTab';
 import { AgentsTab } from './tabs/AgentsTab';
 import { FilesTab } from './tabs/FilesTab';
 import { LogsTab } from './tabs/LogsTab';
+import { SettingsTab } from './tabs/SettingsTab';
+import { HelpTab } from './tabs/HelpTab';
 
-type Tab = 'graph' | 'agents' | 'files' | 'logs';
+type Tab = 'graph' | 'agents' | 'files' | 'logs' | 'settings' | 'help';
 
 export function InspectorPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('graph');
@@ -15,6 +17,8 @@ export function InspectorPanel() {
     { id: 'agents', label: 'Agents' },
     { id: 'files', label: 'Files' },
     { id: 'logs', label: 'Logs' },
+    { id: 'settings', label: 'Settings' },
+    { id: 'help', label: 'Help' },
   ];
 
   if (isCollapsed) {
@@ -56,6 +60,8 @@ export function InspectorPanel() {
         {activeTab === 'agents' && <AgentsTab />}
         {activeTab === 'files' && <FilesTab />}
         {activeTab === 'logs' && <LogsTab />}
+        {activeTab === 'settings' && <SettingsTab />}
+        {activeTab === 'help' && <HelpTab />}
       </div>
     </div>
   );

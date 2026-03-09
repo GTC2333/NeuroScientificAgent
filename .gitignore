@@ -52,3 +52,12 @@ local.yaml
 # Worktrees
 .worktrees/
 worktrees/
+
+# Temp workspaces
+temp_workspace/
+
+# Data
+data/
+
+# Node modules (in frontend)
+frontend/node_modules/

@@ -1,0 +1,10 @@
+# Ignore everything
+*
+
+# But not these
+!backend/
+!frontend/
+!.claude/
+!config.yaml
+!local.yaml.example
+!start.sh

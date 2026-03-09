@@ -2,12 +2,21 @@ import { useNodesState, useEdgesState } from '@xyflow/react';
 import { ReactFlow, Background, Controls } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
+// Grid layout constants
+const GRID_SPACING = 150;
+const CENTER_X = 250;
+const LEFT_X = 100;
+const RIGHT_X = 400;
+const START_Y = 0;
+const LEVEL_1_Y = GRID_SPACING;
+const LEVEL_2_Y = GRID_SPACING * 2;
+
 const initialNodes = [
-  { id: '1', position: { x: 250, y: 0 }, data: { label: 'Principal' }, type: 'input' },
-  { id: '2', position: { x: 100, y: 100 }, data: { label: 'Theorist' } },
-  { id: '3', position: { x: 250, y: 100 }, data: { label: 'Experimentalist' } },
-  { id: '4', position: { x: 400, y: 100 }, data: { label: 'Analyst' } },
-  { id: '5', position: { x: 250, y: 200 }, data: { label: 'Writer' }, type: 'output' },
+  { id: '1', position: { x: CENTER_X, y: START_Y }, data: { label: 'Principal' }, type: 'input' },
+  { id: '2', position: { x: LEFT_X, y: LEVEL_1_Y }, data: { label: 'Theorist' } },
+  { id: '3', position: { x: CENTER_X, y: LEVEL_1_Y }, data: { label: 'Experimentalist' } },
+  { id: '4', position: { x: RIGHT_X, y: LEVEL_1_Y }, data: { label: 'Analyst' } },
+  { id: '5', position: { x: CENTER_X, y: LEVEL_2_Y }, data: { label: 'Writer' }, type: 'output' },
 ];
 
 const initialEdges = [

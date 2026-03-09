@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 @dataclass
 class ServerConfig:
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 9000
 
 
 @dataclass
@@ -23,6 +23,7 @@ class ClaudeConfig:
     cli_path: str = "~/.local/bin/claude"
     model: str = "sonnet"
     timeout: int = 120
+    api_key: Optional[str] = None  # Anthropic API Key (from local.yaml)
 
 
 @dataclass
@@ -41,11 +42,22 @@ class WorkspaceConfig:
 
 
 @dataclass
+class MCPConfig:
+    enabled: bool = True
+    servers: list = None
+
+    def __post_init__(self):
+        if self.servers is None:
+            self.servers = []
+
+
+@dataclass
 class Config:
     server: ServerConfig
     claude: ClaudeConfig
     project: ProjectConfig
     workspace: WorkspaceConfig
+    mcp: MCPConfig
 
 
 def load_config() -> Config:
@@ -76,8 +88,9 @@ def load_config() -> Config:
     claude_cfg = ClaudeConfig(**config_data.get('claude', {}))
     project_cfg = ProjectConfig(**config_data.get('project', {}))
     workspace_cfg = WorkspaceConfig(**config_data.get('workspace', {}))
+    mcp_cfg = MCPConfig(**config_data.get('mcp', {}))
 
-    return Config(server=server_cfg, claude=claude_cfg, project=project_cfg, workspace=workspace_cfg)
+    return Config(server=server_cfg, claude=claude_cfg, project=project_cfg, workspace=workspace_cfg, mcp=mcp_cfg)
 
 
 def get_config() -> Config:

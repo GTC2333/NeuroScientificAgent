@@ -77,3 +77,41 @@ For each hypothesis, provide:
 - Literature review → Load literature_review
 - Mathematical modeling → Use mathematical_modeling
 - Formal verification → Use formal_reasoning
+
+---
+
+## Search Strategy
+
+### Paper Search (Semantic Scholar API)
+Use when:
+- Query asks for research papers
+- Topic is scientific/academic
+- Needs citation information
+- User asks "find papers on X"
+
+**API Endpoints:**
+- `GET /api/papers/search?q={query}&limit={n}` - Search papers
+- `GET /api/papers/{paperId}` - Get paper details
+- `GET /api/papers/{paperId}/citations` - Get citations
+- `GET /api/papers/{paperId}/references` - Get references
+
+### PDF Reading
+Use when:
+- User provides a specific PDF file
+- Needs to extract content from paper
+- Wants to search within a PDF
+
+**API Endpoints:**
+- `POST /api/pdf/read` - Extract PDF text
+- `POST /api/pdf/search` - Search in PDF
+- `GET /api/pdf/metadata` - Get PDF metadata
+
+### Web Search (NOT AVAILABLE)
+Web search via MCP is currently unavailable due to API limitations (minimax does not support function calling).
+- Use paper search as alternative for academic queries
+- Explain limitation to user if they request web search
+
+## Available Skills
+- `paper_search` - Search academic papers via Semantic Scholar
+- `pdf_reader` - Read and search PDF files
+- `literature_review` - Literature review framework

@@ -13,12 +13,21 @@ router = APIRouter()
 # Path to skills directory in the parent project
 SKILLS_DIR = Path(__file__).parent.parent.parent.parent / ".claude" / "skills"
 
+# In-memory storage for session skills (in production, use database)
+_session_skills: Dict[str, List[str]] = {}
+
 
 class Skill(BaseModel):
     name: str
     description: str
     category: str
     path: str
+
+
+class SkillsSelectRequest(BaseModel):
+    """Request model for selecting skills for a session"""
+    session_id: str
+    selected_skills: List[str]
 
 
 @router.get("/skills", response_model=List[Skill])
@@ -115,3 +124,16 @@ async def list_agents():
         }
     ]
     return agents
+
+
+@router.post("/select")
+async def select_skills(request: SkillsSelectRequest):
+    """Select skills for a session"""
+    _session_skills[request.session_id] = request.selected_skills
+    return {"status": "ok", "selected_skills": request.selected_skills}
+
+
+@router.get("/selected/{session_id}")
+async def get_selected_skills(session_id: str):
+    """Get selected skills for a session"""
+    return {"selected_skills": _session_skills.get(session_id, [])}
