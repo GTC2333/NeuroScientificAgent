@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Sidebar from '../sidebar/view/Sidebar';
@@ -8,6 +8,7 @@ import { useDeviceSettings } from '../../hooks/useDeviceSettings';
 import { useSessionProtection } from '../../hooks/useSessionProtection';
 import { useProjectsState } from '../../hooks/useProjectsState';
 import MobileNav from './MobileNav';
+import { MasChat } from '../mas-chat/MasChat';
 
 export default function AppContent() {
   const navigate = useNavigate();
@@ -16,6 +17,7 @@ export default function AppContent() {
   const { isMobile } = useDeviceSettings({ trackPWA: false });
   const { ws, sendMessage, latestMessage, isConnected } = useWebSocket();
   const wasConnectedRef = useRef(false);
+  const [showMasChat, setShowMasChat] = useState(false);
 
   const {
     activeSessions,
@@ -154,6 +156,27 @@ export default function AppContent() {
           setActiveTab={setActiveTab}
           isInputFocused={isInputFocused}
         />
+      )}
+
+      {/* MAS Chat Toggle Button */}
+      <button
+        onClick={() => setShowMasChat(!showMasChat)}
+        className={`fixed bottom-20 right-4 z-50 flex items-center gap-2 rounded-full px-4 py-3 shadow-lg transition-all ${
+          showMasChat
+            ? 'bg-red-600 hover:bg-red-700'
+            : 'bg-purple-600 hover:bg-purple-700'
+        } text-white`}
+        title={showMasChat ? 'Close MAS Research' : 'Open MAS Research'}
+      >
+        <span className="text-lg">🔬</span>
+        <span className="font-medium">{showMasChat ? 'Close' : 'MAS'}</span>
+      </button>
+
+      {/* MAS Chat Panel */}
+      {showMasChat && (
+        <div className="fixed bottom-4 right-4 z-40 h-[600px] w-[450px] rounded-xl shadow-2xl border border-gray-600 overflow-hidden">
+          <MasChat sessionId={sessionId} />
+        </div>
       )}
 
     </div>
