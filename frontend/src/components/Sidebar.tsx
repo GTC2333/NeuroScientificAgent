@@ -1,63 +1,74 @@
-import { useEffect, useState } from 'react';
-import { api } from '../services/api';
-import type { Agent, Skill } from '../types';
+// frontend/src/components/Sidebar.tsx
+import { useStore, SessionStore } from '../store/useStore';
+import { useNavigate } from 'react-router-dom';
 
 export function Sidebar() {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [loading, setLoading] = useState(true);
+  const sessions = useStore((state: SessionStore) => state.sessions);
+  const currentSessionId = useStore((state: SessionStore) => state.currentSessionId);
+  const createSession = useStore((state: SessionStore) => state.createSession);
+  const deleteSession = useStore((state: SessionStore) => state.deleteSession);
+  const setCurrentSession = useStore((state: SessionStore) => state.setCurrentSession);
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [agentsData, skillsData] = await Promise.all([
-          api.getAgents(),
-          api.getSkills(),
-        ]);
-        setAgents(agentsData);
-        setSkills(skillsData.slice(0, 5));
-      } catch (err) {
-        console.error('Failed to load sidebar data:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
+  const handleNewSession = () => {
+    const newSessionId = createSession('New Research', ['principal'], []);
+    navigate(`/${newSessionId}`);
+  };
 
-  if (loading) {
-    return (
-      <aside className="w-72 bg-white border-r border-gray-200 p-4">
-        <div className="text-gray-500">Loading...</div>
-      </aside>
-    );
-  }
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
 
   return (
-    <aside className="w-72 bg-white border-r border-gray-200 p-4 overflow-y-auto">
-      <section className="mb-6">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">Available Agents</h3>
-        <div className="space-y-2">
-          {agents.map((agent) => (
-            <div key={agent.type} className="p-3 border border-gray-200 rounded-lg hover:border-blue-400 cursor-pointer">
-              <h4 className="font-medium text-sm text-gray-900">{agent.name}</h4>
-              <p className="text-xs text-gray-500 mt-1">{agent.description}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+    <div className="w-64 bg-gray-100 border-r border-gray-200 flex flex-col">
+      <div className="p-4">
+        <button
+          onClick={handleNewSession}
+          className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          + New Session
+        </button>
+      </div>
 
-      <section>
-        <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">Available Skills</h3>
-        <div className="space-y-2">
-          {skills.map((skill) => (
-            <div key={skill.name} className="p-3 border border-gray-200 rounded-lg hover:border-blue-400 cursor-pointer">
-              <h4 className="font-medium text-sm text-gray-900">{skill.name}</h4>
-              <p className="text-xs text-gray-500 mt-1">{skill.description}</p>
+      <div className="flex-1 overflow-auto">
+        <div className="px-4 py-2">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            Sessions ({sessions.length})
+          </h3>
+        </div>
+
+        <div className="space-y-1 px-2">
+          {sessions.map((session) => (
+            <div
+              key={session.id}
+              className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer ${
+                session.id === currentSessionId
+                  ? 'bg-blue-100 text-blue-800'
+                  : 'hover:bg-gray-200 text-gray-700'
+              }`}
+              onClick={() => navigate(`/${session.id}`)}
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{session.title}</p>
+                <p className="text-xs text-gray-500">{formatDate(session.updatedAt)}</p>
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteSession(session.id);
+                  if (session.id === currentSessionId) {
+                    navigate('/');
+                  }
+                }}
+                className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 rounded text-red-600"
+              >
+                ×
+              </button>
             </div>
           ))}
         </div>
-      </section>
-    </aside>
+      </div>
+    </div>
   );
 }
