@@ -199,6 +199,7 @@ Respond now as the {agent_type} agent:"""
             self.claude_cli,
             "-p",
             "--print",
+            "--dangerously-skip-permissions",
             "--output-format", "stream-json",
             "--include-partial-messages",
             "--add-dir", str(self.claude_dir),
