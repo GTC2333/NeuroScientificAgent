@@ -1,48 +1,93 @@
 import { useState, useCallback } from 'react';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
+import { useStore } from '../store/useStore';
+import type { SessionStore } from '../store/useStore';
 import { api } from '../services/api';
-import type { Message, AgentType } from '../types';
+import type { Message, Session } from '../types';
 
-interface ChatWindowProps {
-  agentType: AgentType;
-}
-
-export function ChatWindow({ agentType }: ChatWindowProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content: 'Welcome to the Multi-Agent Scientific Operating System. I\'m the Principal Investigator agent. How can I assist with your research today?',
-    },
-  ]);
+export function ChatWindow() {
+  const currentSessionId = useStore((state: SessionStore) => state.currentSessionId);
+  const sessions = useStore((state: SessionStore) => state.sessions);
+  const addMessage = useStore((state: SessionStore) => state.addMessage);
   const [loading, setLoading] = useState(false);
 
+  const currentSession = sessions.find((s: Session) => s.id === currentSessionId);
+  const messages = currentSession?.messages || [];
+
   const handleSend = useCallback(async (text: string) => {
-    const userMessage: Message = { role: 'user', content: text };
-    setMessages((prev) => [...prev, userMessage]);
+    if (!currentSessionId) return;
+
+    const userMessage: Message = {
+      role: 'user',
+      content: text,
+      timestamp: new Date().toISOString(),
+    };
+    addMessage(currentSessionId, userMessage);
     setLoading(true);
 
     try {
+      console.log('[ChatWindow] Sending message:', text);
       const response = await api.sendMessage({
         message: text,
-        agent_type: agentType,
+        agent_type: currentSession?.agents[0] || 'principal',
+        history: messages,
+        session_id: currentSessionId,
+        selected_skills: currentSession?.skills,
       });
 
-      const assistantMessage: Message = { role: 'assistant', content: response.reply };
-      setMessages((prev) => [...prev, assistantMessage]);
+      console.log('[ChatWindow] Response received:', response);
+
+      // Check if response is an error
+      if (response.reply?.startsWith('Error:')) {
+        const errorMsg: Message = {
+          role: 'assistant',
+          content: response.reply,
+          timestamp: new Date().toISOString(),
+        };
+        addMessage(currentSessionId, errorMsg);
+        console.error('[ChatWindow] Backend error:', response.reply);
+      } else {
+        const assistantMessage: Message = {
+          role: 'assistant',
+          content: response.reply || 'No response received',
+          timestamp: new Date().toISOString(),
+        };
+        addMessage(currentSessionId, assistantMessage);
+      }
     } catch (err) {
+      console.error('[ChatWindow] Error:', err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
       const errorMessage: Message = {
         role: 'assistant',
-        content: 'Error: Could not connect to backend. Please ensure the backend is running on port 8000.',
+        content: `Error: ${errorMsg}\n\nPlease check the backend terminal for details.`,
+        timestamp: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, errorMessage]);
+      addMessage(currentSessionId, errorMessage);
     } finally {
       setLoading(false);
     }
-  }, [agentType]);
+  }, [currentSessionId, currentSession, messages, addMessage]);
+
+  // Skills quick bar
+  const skills = currentSession?.skills || [];
 
   return (
     <div className="flex-1 flex flex-col bg-gray-50">
+      {/* Skills Quick Bar */}
+      {skills.length > 0 && (
+        <div className="px-4 py-2 bg-white border-b border-gray-200 flex items-center gap-2 overflow-x-auto">
+          <span className="text-xs text-gray-500 shrink-0">Skills:</span>
+          {skills.map((skill) => (
+            <span
+              key={skill}
+              className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-full shrink-0"
+            >
+              {skill}
+            </span>
+          ))}
+        </div>
+      )}
       <MessageList messages={messages} />
       <MessageInput onSend={handleSend} disabled={loading} />
     </div>
