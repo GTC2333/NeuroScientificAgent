@@ -58,6 +58,15 @@ test('loadRoleToolTemplates: validates required keys', async () => {
   });
 });
 
+test('loadRoleToolTemplates: loads default path and validates required keys', async () => {
+  const result = await loadRoleToolTemplates();
+
+  assert.ok(result.toolTemplates);
+  assert.ok(result.roles);
+  assert.ok(result.defaults);
+  assert.ok(result.defaults.cwd);
+});
+
 test('loadRoleToolTemplates: validates defaults.cwd', async () => {
   const yamlBad = `
     version: "1"

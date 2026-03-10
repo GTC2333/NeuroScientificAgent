@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import YAML from 'yaml';
 
 const DEFAULT_TEMPLATES_PATH =
-  '/root/claudeagent/scientific_agent/.worktrees/sdk-subagents/.claude/teams/role_tool_templates.yaml';
+  '/root/claudeagent/scientific_agent/.claude/teams/role_tool_templates.yaml';
 
 function assertObject(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
