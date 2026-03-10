@@ -1,8 +1,16 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import YAML from 'yaml';
 
 const DEFAULT_TEMPLATES_PATH =
   '/root/claudeagent/scientific_agent/.claude/teams/role_tool_templates.yaml';
+
+function templatesFileLabel(absolutePath) {
+  if (typeof absolutePath === 'string' && absolutePath.trim() !== '') {
+    return path.basename(absolutePath);
+  }
+  return 'templates file';
+}
 
 function assertObject(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -16,6 +24,20 @@ function assertNonEmptyString(value, label) {
   }
 }
 
+function assertStringArray(value, label) {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be a list/array`);
+  }
+  for (let i = 0; i < value.length; i += 1) {
+    if (typeof value[i] !== 'string') {
+      throw new Error(
+        `${label} must contain only strings; found ${typeof value[i]} at index ${i}`
+      );
+    }
+  }
+}
+
 export async function loadRoleToolTemplates(absolutePath = DEFAULT_TEMPLATES_PATH) {
   if (!absolutePath || typeof absolutePath !== 'string') {
     throw new Error('templates path must be a string');
@@ -26,13 +48,13 @@ export async function loadRoleToolTemplates(absolutePath = DEFAULT_TEMPLATES_PAT
     );
   }
 
+  const fileLabel = templatesFileLabel(absolutePath);
+
   let raw;
   try {
     raw = await fs.readFile(absolutePath, 'utf8');
   } catch (err) {
-    throw new Error(
-      `failed to read role/tool templates file at ${absolutePath}: ${err.message}`
-    );
+    throw new Error(`failed to read role/tool templates file (${fileLabel}): ${err.message}`);
   }
 
   let parsed;
@@ -40,7 +62,7 @@ export async function loadRoleToolTemplates(absolutePath = DEFAULT_TEMPLATES_PAT
     parsed = YAML.parse(raw);
   } catch (err) {
     throw new Error(
-      `failed to parse YAML in role/tool templates file at ${absolutePath}: ${err.message}`
+      `failed to parse YAML in role/tool templates file (${fileLabel}): ${err.message}`
     );
   }
 
@@ -72,6 +94,9 @@ export async function loadRoleToolTemplates(absolutePath = DEFAULT_TEMPLATES_PAT
   for (const [name, tpl] of Object.entries(toolTemplates)) {
     assertObject(tpl, `toolTemplates.${name}`);
 
+    assertStringArray(tpl.allowedTools, `toolTemplates.${name}.allowedTools`);
+    assertStringArray(tpl.disallowedTools, `toolTemplates.${name}.disallowedTools`);
+
     const normalized = {
       allowedTools: Array.isArray(tpl.allowedTools) ? tpl.allowedTools.slice() : undefined,
       disallowedTools: Array.isArray(tpl.disallowedTools) ? tpl.disallowedTools.slice() : undefined
@@ -82,6 +107,7 @@ export async function loadRoleToolTemplates(absolutePath = DEFAULT_TEMPLATES_PAT
 
   // Normalize roles
   const normalizedRoles = {};
+  const unknownToolTemplateRefsByRole = {};
   for (const [roleName, roleDef] of Object.entries(roles)) {
     assertObject(roleDef, `roles.${roleName}`);
 
@@ -100,12 +126,38 @@ export async function loadRoleToolTemplates(absolutePath = DEFAULT_TEMPLATES_PAT
     if (!Array.isArray(roleDef.toolTemplateRefs)) {
       throw new Error(`roles.${roleName}.toolTemplateRefs must be a list/array`);
     }
+    for (let i = 0; i < roleDef.toolTemplateRefs.length; i += 1) {
+      const ref = roleDef.toolTemplateRefs[i];
+      if (typeof ref !== 'string') {
+        throw new Error(
+          `roles.${roleName}.toolTemplateRefs must contain only strings; found ${typeof ref} at index ${i}`
+        );
+      }
+    }
+
+    const missingRefs = roleDef.toolTemplateRefs.filter(
+      (ref) => !Object.prototype.hasOwnProperty.call(normalizedToolTemplates, ref)
+    );
+    if (missingRefs.length > 0) {
+      unknownToolTemplateRefsByRole[roleName] = missingRefs;
+    }
 
     normalizedRoles[roleName] = {
       description: roleDef.description,
       model: roleDef.model,
       toolTemplateRefs: roleDef.toolTemplateRefs.slice()
     };
+  }
+
+  const rolesWithUnknownRefs = Object.keys(unknownToolTemplateRefsByRole);
+  if (rolesWithUnknownRefs.length > 0) {
+    const details = rolesWithUnknownRefs
+      .sort()
+      .map((roleName) =>
+        `${roleName}: ${unknownToolTemplateRefsByRole[roleName].join(', ')}`
+      )
+      .join('; ');
+    throw new Error(`unknown toolTemplateRefs in roles: ${details}`);
   }
 
   return {

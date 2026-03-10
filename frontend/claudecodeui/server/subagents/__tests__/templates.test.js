@@ -81,3 +81,49 @@ test('loadRoleToolTemplates: validates defaults.cwd', async () => {
     });
   });
 });
+
+test('loadRoleToolTemplates: rejects non-string tool names', async () => {
+  const yaml = `
+    version: "1"
+    defaults:
+      cwd: /tmp
+      model: claude-sonnet-4-20250514
+    toolTemplates:
+      standard:
+        allowedTools: [Read, 123]
+    roles:
+      principal:
+        description: Team lead
+        model: claude-sonnet-4-20250514
+        toolTemplateRefs: [standard]
+  `;
+
+  await withTempFile(yaml, async (p) => {
+    await assert.rejects(() => loadRoleToolTemplates(p), {
+      message: /toolTemplates\.standard\.allowedTools must contain only strings/
+    });
+  });
+});
+
+test('loadRoleToolTemplates: rejects unknown toolTemplateRefs', async () => {
+  const yaml = `
+    version: "1"
+    defaults:
+      cwd: /tmp
+      model: claude-sonnet-4-20250514
+    toolTemplates:
+      standard:
+        allowedTools: [Read]
+    roles:
+      principal:
+        description: Team lead
+        model: claude-sonnet-4-20250514
+        toolTemplateRefs: [standard, missingTemplate]
+  `;
+
+  await withTempFile(yaml, async (p) => {
+    await assert.rejects(() => loadRoleToolTemplates(p), {
+      message: /unknown toolTemplateRefs in roles: principal: missingTemplate/
+    });
+  });
+});
