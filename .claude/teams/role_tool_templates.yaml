@@ -1,0 +1,39 @@
+# Role/Tool templates for SDK subagents (used by claudecodeui server)
+#
+# Required top-level keys:
+# - toolTemplates
+# - roles
+# - defaults.cwd
+
+toolTemplates:
+  readonly:
+    description: "Read-only access (no filesystem writes)"
+    tools:
+      - Read
+      - Glob
+      - Grep
+
+  standard:
+    description: "Standard coding access"
+    tools:
+      - Read
+      - Glob
+      - Grep
+      - Edit
+      - Write
+      - Bash
+
+roles:
+  principal:
+    template: standard
+  theorist:
+    template: readonly
+  experimentalist:
+    template: standard
+  analyst:
+    template: standard
+  writer:
+    template: readonly
+
+defaults:
+  cwd: /root/claudeagent/scientific_agent/temp_workspace
