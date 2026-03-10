@@ -33,21 +33,21 @@ async function getWorkspaceRoot() {
 }
 
 // Configure allowed workspace root (async, will be initialized on first request)
-let WORKSPACES_ROOT = os.homedir();
-let workspaceRootReady = getWorkspaceRoot().then(root => {
+// This is the module-level variable that will be set from config
+export let WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || os.homedir();
+
+// Initialize workspace root from config file on module load
+getWorkspaceRoot().then(root => {
   WORKSPACES_ROOT = root;
 });
 
 // Getter that ensures workspace root is loaded
-export function getWorkpacesRoot() {
+export function getWorkspacesRoot() {
   return WORKSPACES_ROOT;
 }
 
 // Export async function for modules that need to wait for initialization
 export { getWorkspaceRoot };
-
-// Keep synchronous export for backward compatibility (will use home dir until loaded)
-export const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || os.homedir();();
 
 // System-critical paths that should never be used as workspace directories
 export const FORBIDDEN_PATHS = [
