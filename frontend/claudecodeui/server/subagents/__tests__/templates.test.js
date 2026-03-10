@@ -19,22 +19,27 @@ async function withTempFile(contents, fn) {
 
 test('loadRoleToolTemplates: loads and normalizes YAML', async () => {
   const yaml = `
-    toolTemplates:
-      standard:
-        description: Standard access
-        tools: [Read, Write]
-    roles:
-      principal:
-        template: standard
+    version: "1"
     defaults:
       cwd: /tmp
+      model: claude-sonnet-4-20250514
+    toolTemplates:
+      standard:
+        allowedTools: [Read, Write]
+    roles:
+      principal:
+        description: Team lead
+        model: claude-sonnet-4-20250514
+        toolTemplateRefs: [standard]
   `;
 
   const result = await withTempFile(yaml, (p) => loadRoleToolTemplates(p));
 
+  assert.equal(result.version, '1');
   assert.equal(result.defaults.cwd, '/tmp');
-  assert.equal(result.roles.principal.template, 'standard');
-  assert.deepEqual(result.toolTemplates.standard.tools, ['Read', 'Write']);
+  assert.equal(result.defaults.model, 'claude-sonnet-4-20250514');
+  assert.deepEqual(result.roles.principal.toolTemplateRefs, ['standard']);
+  assert.deepEqual(result.toolTemplates.standard.allowedTools, ['Read', 'Write']);
   assert.equal(result.meta.path.startsWith('/'), true);
 });
 
@@ -45,19 +50,20 @@ test('loadRoleToolTemplates: requires absolute path', async () => {
 });
 
 test('loadRoleToolTemplates: validates required keys', async () => {
-  const yamlMissing = `defaults: { cwd: /tmp }`;
+  const yamlMissing = `defaults: { cwd: /tmp, model: x }`;
   await withTempFile(yamlMissing, async (p) => {
     await assert.rejects(() => loadRoleToolTemplates(p), {
-      message: /missing required key: toolTemplates/
+      message: /missing required key: version/
     });
   });
 });
 
 test('loadRoleToolTemplates: validates defaults.cwd', async () => {
   const yamlBad = `
+    version: "1"
     toolTemplates: {}
     roles: {}
-    defaults: { cwd: "" }
+    defaults: { cwd: "", model: x }
   `;
 
   await withTempFile(yamlBad, async (p) => {

@@ -5,17 +5,21 @@
 # - roles
 # - defaults.cwd
 
+version: "1"
+
+defaults:
+  cwd: /root/claudeagent/scientific_agent/temp_workspace
+  model: claude-sonnet-4-20250514
+
 toolTemplates:
   readonly:
-    description: "Read-only access (no filesystem writes)"
-    tools:
+    allowedTools:
       - Read
       - Glob
       - Grep
 
   standard:
-    description: "Standard coding access"
-    tools:
+    allowedTools:
       - Read
       - Glob
       - Grep
@@ -25,15 +29,26 @@ toolTemplates:
 
 roles:
   principal:
-    template: standard
-  theorist:
-    template: readonly
-  experimentalist:
-    template: standard
-  analyst:
-    template: standard
-  writer:
-    template: readonly
+    description: Team lead; coordinates subagents and integrates results
+    model: claude-sonnet-4-20250514
+    toolTemplateRefs: [standard]
 
-defaults:
-  cwd: /root/claudeagent/scientific_agent/temp_workspace
+  theorist:
+    description: Hypothesis generation and high-level reasoning (read-only)
+    model: claude-sonnet-4-20250514
+    toolTemplateRefs: [readonly]
+
+  experimentalist:
+    description: Experiment design and implementation
+    model: claude-sonnet-4-20250514
+    toolTemplateRefs: [standard]
+
+  analyst:
+    description: Data analysis and validation
+    model: claude-sonnet-4-20250514
+    toolTemplateRefs: [standard]
+
+  writer:
+    description: Reporting and synthesis (read-only)
+    model: claude-sonnet-4-20250514
+    toolTemplateRefs: [readonly]
