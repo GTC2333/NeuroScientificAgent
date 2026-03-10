@@ -148,19 +148,28 @@ export function useProjectsState({
 
   const loadingProgressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Workspace root filter - only show projects under temp_workspace
+  const WORKSPACE_ROOT_FILTER = '/root/claudeagent/scientific_agent/temp_workspace';
+
   const fetchProjects = useCallback(async () => {
     try {
       setIsLoadingProjects(true);
       const response = await api.projects();
       const projectData = (await response.json()) as Project[];
 
+      // Filter projects by workspace root (frontend safety filter)
+      const filteredProjects = projectData.filter((project: Project) => {
+        if (!project.fullPath) return false;
+        return project.fullPath.startsWith(WORKSPACE_ROOT_FILTER);
+      });
+
       setProjects((prevProjects) => {
         if (prevProjects.length === 0) {
-          return projectData;
+          return filteredProjects;
         }
 
-        return projectsHaveChanges(prevProjects, projectData, true)
-          ? projectData
+        return projectsHaveChanges(prevProjects, filteredProjects, true)
+          ? filteredProjects
           : prevProjects;
       });
     } catch (error) {
