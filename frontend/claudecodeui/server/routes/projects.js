@@ -3,7 +3,10 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import { addProjectManually } from '../projects.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const router = express.Router();
 
@@ -12,8 +15,39 @@ function sanitizeGitError(message, token) {
   return message.replace(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '***');
 }
 
-// Configure allowed workspace root (defaults to user's home directory)
-export const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || os.homedir();
+// Read workspace root from config file
+async function getWorkspaceRoot() {
+  // Config file is at scientific_agent/.claude/settings.json
+  // From server/routes/, go up 4 levels to scientific_agent
+  const configPath = path.resolve(__dirname, '../../../../.claude/settings.json');
+  try {
+    const content = await fs.readFile(configPath, 'utf-8');
+    const config = JSON.parse(content);
+    const root = config.workspaceRoot || os.homedir();
+    console.log('[API] Workspace root loaded from config:', root);
+    return root;
+  } catch (error) {
+    console.log('[API] Could not load workspace config, using home directory:', error.message);
+    return os.homedir();
+  }
+}
+
+// Configure allowed workspace root (async, will be initialized on first request)
+let WORKSPACES_ROOT = os.homedir();
+let workspaceRootReady = getWorkspaceRoot().then(root => {
+  WORKSPACES_ROOT = root;
+});
+
+// Getter that ensures workspace root is loaded
+export function getWorkpacesRoot() {
+  return WORKSPACES_ROOT;
+}
+
+// Export async function for modules that need to wait for initialization
+export { getWorkspaceRoot };
+
+// Keep synchronous export for backward compatibility (will use home dir until loaded)
+export const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || os.homedir();();
 
 // System-critical paths that should never be used as workspace directories
 export const FORBIDDEN_PATHS = [
