@@ -67,6 +67,7 @@ import { open } from 'sqlite';
 import os from 'os';
 import sessionManager from './sessionManager.js';
 import { applyCustomSessionNames } from './database/db.js';
+import { getWorkspaceRoot } from './routes/projects.js';
 
 // Import TaskMaster detection functions
 async function detectTaskMasterFolder(projectPath) {
@@ -638,7 +639,22 @@ async function getProjects(progressCallback = null) {
     });
   }
 
-  return projects;
+  // Filter projects by workspace root
+  const workspaceRoot = await getWorkspaceRoot();
+  console.log('[Projects] Filtering projects by workspace root:', workspaceRoot);
+
+  const filteredProjects = projects.filter(project => {
+    if (!project.fullPath) return false;
+    const isUnderWorkspace = project.fullPath.startsWith(workspaceRoot);
+    if (!isUnderWorkspace) {
+      console.log('[Projects] Filtering out project not under workspace:', project.fullPath);
+    }
+    return isUnderWorkspace;
+  });
+
+  console.log('[Projects] Returning', filteredProjects.length, 'of', projects.length, 'projects');
+
+  return filteredProjects;
 }
 
 async function getSessions(projectName, limit = 5, offset = 0) {
