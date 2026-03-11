@@ -1,5 +1,6 @@
 """
 Claude Code Service - Invokes Claude Code CLI for agent responses
+Can also use Anthropic SDK directly via claude_sdk module
 """
 
 import subprocess
@@ -13,6 +14,7 @@ import os.path
 import warnings
 
 from src.config import get_config
+from src.services.claude_sdk import get_claude_sdk_service, ClaudeSDKService
 
 logger = logging.getLogger("MAS.ClaudeCode")
 
@@ -25,23 +27,16 @@ CLAUDE_SESSION_ENV_DIR = Path.home() / ".claude" / "session-env"
 
 
 def _cleanup_session(session_id: str) -> None:
-    """Clean up any existing session before creating a new one"""
-    if not session_id:
-        return
-    session_dir = CLAUDE_SESSION_ENV_DIR / session_id
-    if session_dir.exists():
-        try:
-            import shutil
-            shutil.rmtree(session_dir)
-            logger.info(f"[ClaudeCode] Cleaned up existing session: {session_id}")
-        except Exception as e:
-            logger.warning(f"[ClaudeCode] Failed to clean up session {session_id}: {e}")
+    """Clean up session directory when explicitly requested (not on every invocation)"""
+    # NOTE: Session cleanup is now handled explicitly by the session management layer
+    # Do NOT automatically clean up sessions here - we want to preserve conversation history
+    pass
 
 
 class ClaudeCodeService:
-    """Service to invoke Claude Code CLI"""
+    """Service to invoke Claude Code CLI or SDK"""
 
-    def __init__(self, project_dir: str = None):
+    def __init__(self, project_dir: str = None, use_sdk: bool = True):
         config = get_config()
 
         # Use temp_workspace as default project directory
@@ -54,10 +49,20 @@ class ClaudeCodeService:
         self.timeout = config.claude.timeout
         self.default_model = config.claude.model
         self.api_key = config.claude.api_key
+        self.use_sdk = use_sdk
 
         # MCP configuration
         self.mcp_enabled = config.mcp.enabled if hasattr(config, 'mcp') else True
         self.mcp_servers = config.mcp.servers if hasattr(config, 'mcp') else []
+
+        # Initialize SDK service if enabled
+        self.sdk_service: Optional[ClaudeSDKService] = None
+        if self.use_sdk:
+            try:
+                self.sdk_service = get_claude_sdk_service()
+                logger.info("[ClaudeCode] SDK mode enabled")
+            except Exception as e:
+                logger.warning(f"[ClaudeCode] Failed to initialize SDK: {e}, falling back to CLI")
 
     def _load_settings_env(self) -> dict:
         """Load environment variables from settings.local.json"""
@@ -251,14 +256,32 @@ Respond now as the {agent_type} agent:"""
     def invoke(self, message: str, agent_type: str = "principal",
                model: str = None, session_id: str = None,
                skills: List[str] = None) -> str:
-        """Invoke Claude Code CLI and return response"""
+        """Invoke Claude Code CLI or SDK and return response"""
+
+        # Use SDK if available
+        if self.use_sdk and self.sdk_service:
+            return self.sdk_service.invoke(
+                message=message,
+                agent_type=agent_type,
+                model=model,
+                session_id=session_id,
+                skills=skills
+            )
+
+        # Fallback to CLI
+        return self._invoke_cli(message, agent_type, model, session_id, skills)
+
+    def _invoke_cli(self, message: str, agent_type: str = "principal",
+                    model: str = None, session_id: str = None,
+                    skills: List[str] = None) -> str:
+        """Invoke Claude Code CLI (fallback method)"""
         # Clean up existing session before creating new one
         _cleanup_session(session_id)
 
         model = model or self.default_model
 
         # Enhanced logging for invocation
-        logger.info(f"[ClaudeCode] ===== INVOCATION START =====")
+        logger.info(f"[ClaudeCode] ===== INVOCATION START (CLI) =====")
         logger.info(f"[ClaudeCode] Agent: {agent_type}, Model: {model}, Session: {session_id}")
         logger.info(f"[ClaudeCode] Skills: {skills}")
         logger.info(f"[ClaudeCode] Message: {message[:200]}...")
@@ -269,7 +292,6 @@ Respond now as the {agent_type} agent:"""
             self.claude_cli,
             "-p",
             "--print",
-            "--dangerously-skip-permissions",
             "--debug", "mcp",
             "--output-format", "text",
             "--add-dir", str(self.claude_dir),
@@ -363,7 +385,26 @@ Respond now as the {agent_type} agent:"""
     def invoke_streaming(self, message: str, agent_type: str = "principal",
                           model: str = None, session_id: str = None,
                           skills: List[str] = None) -> Generator[str, None, None]:
-        """Invoke Claude Code CLI with streaming output"""
+        """Invoke Claude Code CLI or SDK with streaming output"""
+
+        # Use SDK if available
+        if self.use_sdk and self.sdk_service:
+            yield from self.sdk_service.invoke_streaming(
+                message=message,
+                agent_type=agent_type,
+                model=model,
+                session_id=session_id,
+                skills=skills
+            )
+            return
+
+        # Fallback to CLI
+        yield from self._invoke_streaming_cli(message, agent_type, model, session_id, skills)
+
+    def _invoke_streaming_cli(self, message: str, agent_type: str = "principal",
+                              model: str = None, session_id: str = None,
+                              skills: List[str] = None) -> Generator[str, None, None]:
+        """Invoke Claude Code CLI with streaming output (fallback method)"""
         # Clean up existing session before creating new one
         _cleanup_session(session_id)
 
@@ -375,7 +416,6 @@ Respond now as the {agent_type} agent:"""
             self.claude_cli,
             "-p",
             "--print",
-            "--dangerously-skip-permissions",
             "--output-format", "stream-json",
             "--include-partial-messages",
             "--add-dir", str(self.claude_dir),

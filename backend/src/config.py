@@ -102,3 +102,7 @@ def get_config() -> Config:
 
 
 _config: Optional[Config] = None
+
+
+# Alias for backward compatibility
+settings = get_config()

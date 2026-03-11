@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from src.api import chat, tasks, skills, papers, sessions, files, pdf
+from src.api import auth, sandboxes, websocket, projects
 
 # Configure logging
 logging.basicConfig(
@@ -42,6 +43,10 @@ app.include_router(papers.router, prefix="/api", tags=["Papers"])
 app.include_router(sessions.router, prefix="/api", tags=["Sessions"])
 app.include_router(files.router, prefix="/api", tags=["Files"])
 app.include_router(pdf.router, prefix="/api", tags=["PDF"])
+app.include_router(auth.router, prefix="/api", tags=["Auth"])
+app.include_router(sandboxes.router, prefix="/api", tags=["Sandboxes"])
+app.include_router(websocket.router, tags=["WebSocket"])
+app.include_router(projects.router, prefix="/api", tags=["Projects"])
 
 # In-memory log storage
 _log_store: list = []
@@ -112,6 +117,15 @@ async def root():
         "version": "0.1.0",
         "status": "running"
     }
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize default workspaces on startup"""
+    from src.api.sandboxes import init_default_workspace
+    logger.info("[startup] Initializing default workspace...")
+    init_default_workspace()
+    logger.info("[startup] Default workspace initialized")
 
 
 @app.get("/health")
