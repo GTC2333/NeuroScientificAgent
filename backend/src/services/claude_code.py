@@ -8,7 +8,7 @@ import json
 import os
 import logging
 from pathlib import Path
-from typing import Generator, List, Optional
+from typing import Dict, Generator, List, Optional
 import asyncio
 import os.path
 import warnings
@@ -20,7 +20,7 @@ logger = logging.getLogger("MAS.ClaudeCode")
 
 # Path to the project .claude directory
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-CLAUDE_DIR = PROJECT_ROOT / ".claude"
+CLAUDE_DIR = PROJECT_ROOT / "claude"
 
 # Claude Code session environment directory
 CLAUDE_SESSION_ENV_DIR = Path.home() / ".claude" / "session-env"
@@ -44,7 +44,7 @@ class ClaudeCodeService:
         default_workspace = project_root / config.workspace.temp_dir
 
         self.project_dir = project_dir or str(default_workspace)
-        self.claude_dir = Path(config.project.claude_dir).resolve()
+        self.claude_dir = (PROJECT_ROOT / config.project.claude_dir).resolve()
         self.claude_cli = os.path.expanduser(config.claude.cli_path)
         self.timeout = config.claude.timeout
         self.default_model = config.claude.model
@@ -255,7 +255,8 @@ Respond now as the {agent_type} agent:"""
 
     def invoke(self, message: str, agent_type: str = "principal",
                model: str = None, session_id: str = None,
-               skills: List[str] = None) -> str:
+               skills: List[str] = None,
+               history: List[dict] = None) -> str:
         """Invoke Claude Code CLI or SDK and return response"""
 
         # Use SDK if available
@@ -265,7 +266,8 @@ Respond now as the {agent_type} agent:"""
                 agent_type=agent_type,
                 model=model,
                 session_id=session_id,
-                skills=skills
+                skills=skills,
+                history=history,
             )
 
         # Fallback to CLI
@@ -384,9 +386,15 @@ Respond now as the {agent_type} agent:"""
 
     def invoke_streaming(self, message: str, agent_type: str = "principal",
                           model: str = None, session_id: str = None,
-                          skills: List[str] = None) -> Generator[str, None, None]:
-        """Invoke Claude Code CLI or SDK with streaming output"""
+                          skills: List[str] = None,
+                          history: List[dict] = None) -> Generator[Dict, None, None]:
+        """Invoke Claude Code CLI or SDK with streaming output.
 
+        Yields structured event dicts:
+            {"type": "text", "text": "..."}
+            {"type": "tool_use", "id": "...", "name": "...", "input": {...}}
+            {"type": "tool_result", "tool_use_id": "...", "content": "...", "is_error": bool}
+        """
         # Use SDK if available
         if self.use_sdk and self.sdk_service:
             yield from self.sdk_service.invoke_streaming(
@@ -394,12 +402,14 @@ Respond now as the {agent_type} agent:"""
                 agent_type=agent_type,
                 model=model,
                 session_id=session_id,
-                skills=skills
+                skills=skills,
+                history=history,
             )
             return
 
-        # Fallback to CLI
-        yield from self._invoke_streaming_cli(message, agent_type, model, session_id, skills)
+        # Fallback to CLI (wraps plain text in event format)
+        for text in self._invoke_streaming_cli(message, agent_type, model, session_id, skills):
+            yield {"type": "text", "text": text}
 
     def _invoke_streaming_cli(self, message: str, agent_type: str = "principal",
                               model: str = None, session_id: str = None,
