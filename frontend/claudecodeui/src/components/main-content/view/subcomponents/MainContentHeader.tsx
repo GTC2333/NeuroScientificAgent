@@ -2,6 +2,7 @@ import type { MainContentHeaderProps } from '../../types/types';
 import MobileMenuButton from './MobileMenuButton';
 import MainContentTabSwitcher from './MainContentTabSwitcher';
 import MainContentTitle from './MainContentTitle';
+import SandboxControls from './SandboxControls';
 
 export default function MainContentHeader({
   activeTab,
@@ -25,7 +26,8 @@ export default function MainContentHeader({
           />
         </div>
 
-        <div className="hidden flex-shrink-0 sm:block">
+        <div className="hidden flex-shrink-0 sm:flex items-center gap-4">
+          <SandboxControls />
           <MainContentTabSwitcher
             activeTab={activeTab}
             setActiveTab={setActiveTab}

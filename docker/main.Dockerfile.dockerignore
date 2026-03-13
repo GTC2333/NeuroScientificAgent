@@ -1,0 +1,18 @@
+# Main container build context whitelist
+*
+
+# Backend code
+!backend/
+# Frontend source
+!frontend/
+# Agent definitions
+!claude/
+# Config
+!config.yaml
+!local.yaml.example
+# Docker build files
+!docker/requirements.txt
+!docker/nginx.conf
+!docker/offline-deps/
+# Start script
+!start.sh

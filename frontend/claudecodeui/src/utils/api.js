@@ -98,6 +98,7 @@ export const api = {
     delete: (id) => authenticatedFetch(`/api/sandboxes/${id}`, { method: 'DELETE' }),
     start: (id) => authenticatedFetch(`/api/sandboxes/${id}/start`, { method: 'POST' }),
     stop: (id) => authenticatedFetch(`/api/sandboxes/${id}/stop`, { method: 'POST' }),
+    rebuild: () => authenticatedFetch('/api/sandboxes/rebuild', { method: 'POST' }),
   },
 
   // Sessions

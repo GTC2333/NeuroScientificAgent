@@ -225,7 +225,7 @@ class SandboxService:
 
     # ---- Core CRUD ----
 
-    def create_sandbox(self, sandbox_id: str, user_id: str, name: str) -> SandboxInfo:
+    def create_sandbox(self, sandbox_id: str, user_id: str, name: str, username: str = "") -> SandboxInfo:
         """Create a new sandbox with Docker container."""
         # 1. Create user directories
         workspace_dir, data_dir = self._ensure_user_dirs(user_id, name)
@@ -236,8 +236,8 @@ class SandboxService:
         # 3. Generate API key
         api_key = str(uuid.uuid4())
 
-        # 4. Container naming
-        container_name = f"mas-sandbox-{sandbox_id[:8]}"
+        # 4. Container naming (use username if provided for 1:1 model)
+        container_name = f"mas-sandbox-{username}" if username else f"mas-sandbox-{sandbox_id[:8]}"
         api_url = f"http://{container_name}:9002"
         host_api_url = f"http://localhost:{host_port}"
 
@@ -358,6 +358,14 @@ class SandboxService:
             if s.get("user_id") == user_id
         ]
 
+    def find_by_user(self, user_id: str) -> Optional[SandboxInfo]:
+        """Find the single sandbox for a user (1:1 model)."""
+        sandboxes = _load_sandboxes_json()
+        for sid, data in sandboxes.items():
+            if data.get("user_id") == user_id:
+                return SandboxInfo.from_dict(data)
+        return None
+
     def start_sandbox(self, sandbox_id: str) -> Optional[SandboxInfo]:
         """Start a stopped sandbox container."""
         sandboxes = _load_sandboxes_json()
@@ -395,6 +403,42 @@ class SandboxService:
         sandboxes[sandbox_id] = data
         _save_sandboxes_json(sandboxes)
         return SandboxInfo.from_dict(data)
+
+    def rebuild_sandbox(self, sandbox_id: str, username: str = "") -> Optional[SandboxInfo]:
+        """Rebuild a sandbox: delete container, recreate with same config.
+        Workspace directory is preserved (not deleted).
+        """
+        sandboxes = _load_sandboxes_json()
+        if sandbox_id not in sandboxes:
+            return None
+
+        data = sandboxes[sandbox_id]
+        user_id = data["user_id"]
+        name = data["name"]
+        container_name = data.get("container_name", "")
+
+        # Stop and remove existing container
+        if self.docker_client and container_name:
+            try:
+                container = self.docker_client.containers.get(container_name)
+                container.stop(timeout=5)
+                container.remove(force=True)
+                logger.info("[SandboxService] Removed container for rebuild: %s", container_name)
+            except docker.errors.NotFound:
+                pass
+            except Exception as e:
+                logger.error("[SandboxService] Error removing container %s: %s", container_name, e)
+
+        # Release old port
+        self.port_allocator.release(sandbox_id)
+
+        # Remove old JSON entry
+        del sandboxes[sandbox_id]
+        _save_sandboxes_json(sandboxes)
+
+        # Create new sandbox with same user/name
+        new_id = str(uuid.uuid4())
+        return self.create_sandbox(new_id, user_id, name, username=username)
 
     def verify_access(self, sandbox_id: str, user_id: str) -> bool:
         """Check if user owns this sandbox."""

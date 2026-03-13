@@ -113,7 +113,7 @@ def find_sandbox_for_project(project_path: str, user_id: str) -> Optional[str]:
     sandboxes = load_sandboxes()
     for sandbox_id, sandbox in sandboxes.items():
         if sandbox["user_id"] == user_id:
-            if sandbox.get("workspace_path") == project_path or sandbox_id == project_path:
+            if sandbox.get("workspace_dir") == project_path or sandbox.get("workspace_path") == project_path or sandbox_id == project_path:
                 return sandbox_id
     # Fallback: return first sandbox for user
     for sandbox_id, sandbox in sandboxes.items():
@@ -143,7 +143,7 @@ def build_projects_for_user(user_id: str) -> list:
         projects.append({
             "name": sandbox["id"],
             "displayName": sandbox["name"],
-            "fullPath": sandbox["workspace_path"],
+            "fullPath": sandbox.get("workspace_dir") or sandbox.get("workspace_path", ""),
             "sessions": sandbox_sessions,
         })
     return projects

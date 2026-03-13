@@ -1,0 +1,12 @@
+# Sandbox container build context whitelist
+*
+
+# Sandbox code
+!sandbox/
+# Agent definitions
+!claude/
+# Docker build files
+!docker/sandbox-requirements.txt
+!docker/offline-deps/
+# Config
+!config.yaml

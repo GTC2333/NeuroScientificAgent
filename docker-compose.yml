@@ -1,37 +1,41 @@
 version: '3.8'
 
 services:
-  # Main Container - Backend + Frontend + Docker Sandbox Manager
+  # Main Container - Nginx + Backend API + Docker Sandbox Manager
   main:
-    build:
-      context: .
-      dockerfile: docker/main.Dockerfile
+    image: ${MAIN_IMAGE:-mas-main:latest}
     container_name: mas-main
     ports:
-      - "9000:9000"  # Backend API
-      - "9001:9001"  # Frontend UI
+      - "${FRONTEND_PORT:-9001}:80"  # Nginx serves frontend + proxies API
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
       - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-20250514}
       - CLAUDE_TIMEOUT=${CLAUDE_TIMEOUT:-300}
-      - MAS_SANDBOX_IMAGE=${MAS_SANDBOX_IMAGE:-mas-sandbox:latest}
-      - MAS_NETWORK=${MAS_NETWORK:-mas-network}
+      - MAS_SANDBOX_IMAGE=${SANDBOX_IMAGE:-mas-sandbox:latest}
+      - MAS_NETWORK=${SANDBOX_NETWORK:-mas-network}
+      - SANDBOX_MEM_LIMIT=${SANDBOX_MEM_LIMIT:-512m}
+      - SANDBOX_CPU_QUOTA=${SANDBOX_CPU_QUOTA:-50000}
+      - SANDBOX_PORT_RANGE_START=${SANDBOX_PORT_RANGE_START:-30000}
+      - SANDBOX_PORT_RANGE_END=${SANDBOX_PORT_RANGE_END:-39999}
     volumes:
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
+      - ${USERS_DIR:-/root/claudeagent/users}:/root/claudeagent/users
     networks:
       - mas-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 30s
       timeout: 10s
+      start_period: 10s
       retries: 3
 
 networks:
   mas-network:
+    name: mas-network
     driver: bridge
 
 volumes:

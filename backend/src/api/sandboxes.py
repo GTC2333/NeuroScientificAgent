@@ -113,15 +113,20 @@ async def create_sandbox(
     data: SandboxCreate,
     current_user: UserResponse = Depends(get_current_user),
 ):
-    """Create a new sandbox."""
+    """Create the user's sandbox (1:1 model). Fails if one already exists."""
     service = get_sandbox_service()
+
+    # Enforce 1:1: check if user already has a sandbox
+    existing = service.find_by_user(current_user.id)
+    if existing:
+        raise HTTPException(status_code=409, detail="Sandbox already exists. Use rebuild to recreate.")
+
     sandbox_id = str(uuid.uuid4())
-    user_sandboxes = service.list_sandboxes(current_user.id)
-    name = data.name.strip() if data.name else f"sandbox-{len(user_sandboxes) + 1}"
+    name = data.name.strip() if data.name else "default"
 
-    info = service.create_sandbox(sandbox_id, current_user.id, name)
+    info = service.create_sandbox(sandbox_id, current_user.id, name, username=current_user.username)
 
-    # Wait for healthy (in thread to avoid blocking event loop)
+    # Wait for healthy
     if info.status == "running" and info.api_url:
         import asyncio
         loop = asyncio.get_event_loop()
@@ -131,7 +136,7 @@ async def create_sandbox(
         if not healthy:
             logger.warning("[sandboxes] Container not healthy after 30s: %s", info.container_name)
 
-    logger.info("[sandboxes] Created sandbox %s for user %s", sandbox_id[:8], current_user.username)
+    logger.info("[sandboxes] Created sandbox for user %s", current_user.username)
     return _to_response(info)
 
 
@@ -182,6 +187,36 @@ async def delete_sandbox(
 
     logger.info("[sandboxes] Deleted sandbox %s", sandbox_id[:8])
     return {"message": "Sandbox deleted"}
+
+
+@router.post("/sandboxes/rebuild", response_model=SandboxResponse)
+async def rebuild_sandbox(
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Rebuild the user's sandbox (destroy container, recreate). Workspace files preserved."""
+    service = get_sandbox_service()
+    existing = service.find_by_user(current_user.id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="No sandbox to rebuild. Create one first.")
+    if existing.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    info = service.rebuild_sandbox(existing.sandbox_id, username=current_user.username)
+    if not info:
+        raise HTTPException(status_code=500, detail="Rebuild failed")
+
+    # Wait for healthy
+    if info.status == "running" and info.api_url:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        healthy = await loop.run_in_executor(
+            None, service.wait_for_healthy, info.api_url, 30
+        )
+        if not healthy:
+            logger.warning("[sandboxes] Rebuilt container not healthy after 30s: %s", info.container_name)
+
+    logger.info("[sandboxes] Rebuilt sandbox for user %s", current_user.username)
+    return _to_response(info)
 
 
 @router.post("/sandboxes/{sandbox_id}/start")

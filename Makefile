@@ -1,19 +1,20 @@
-.PHONY: build build-sandbox build-all up down down-all logs logs-main clean rebuild restart
+.PHONY: build build-sandbox build-main up down down-all logs clean rebuild restart
 
-# Build main container
-build:
-	docker-compose build
+SCRIPT_DIR := $(shell cd .. && pwd)
+TAG ?= latest
 
-# Build sandbox image
+# Build images (delegates to build_images.sh)
+build: build-sandbox build-main
+
 build-sandbox:
-	docker build -t mas-sandbox:latest -f docker/sandbox.Dockerfile .
+	$(SCRIPT_DIR)/build_images.sh sandbox $(TAG)
 
-# Build everything
-build-all: build-sandbox build
+build-main:
+	$(SCRIPT_DIR)/build_images.sh main $(TAG)
 
-# Start main container
+# Start main container (delegates to run_main.sh)
 up:
-	docker-compose up -d
+	$(SCRIPT_DIR)/run_main.sh $(TAG)
 
 # Stop main container
 down:
@@ -24,23 +25,18 @@ down-all:
 	docker-compose down
 	docker ps --filter "name=mas-sandbox-" -q | xargs -r docker rm -f 2>/dev/null || true
 
-# View all logs
+# View logs
 logs:
 	docker-compose logs -f
 
-# View main logs
-logs-main:
-	docker-compose logs -f main
-
-# Clean up everything (containers, volumes, orphan sandboxes)
+# Clean up everything
 clean:
 	docker-compose down -v
 	docker ps --filter "name=mas-sandbox-" -q | xargs -r docker rm -f 2>/dev/null || true
-	docker volume ls --filter "name=mas-workspace-" -q | xargs -r docker volume rm 2>/dev/null || true
 	docker system prune -f
 
 # Rebuild and start
-rebuild: down build-all up
+rebuild: down build up
 
 # Quick restart
 restart: down up

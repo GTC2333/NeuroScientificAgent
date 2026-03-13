@@ -1,0 +1,8 @@
+# Ignore downloaded dependencies (they are large and machine-specific)
+# Keep directory structure via .gitkeep files
+*.whl
+*.deb
+*.tar.gz
+*.gz
+Packages
+!.gitkeep

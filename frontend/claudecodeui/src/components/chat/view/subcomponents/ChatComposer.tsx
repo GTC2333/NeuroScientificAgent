@@ -18,6 +18,7 @@ import ClaudeStatus from './ClaudeStatus';
 import ImageAttachment from './ImageAttachment';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import ChatInputControls from './ChatInputControls';
+import { useSandboxState } from '../../../../hooks/useSandboxState';
 
 interface MentionableFile {
   name: string;
@@ -151,6 +152,8 @@ export default function ChatComposer({
   onTranscript,
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
+  const { status: sandboxStatus } = useSandboxState();
+  const hasSandbox = sandboxStatus === 'running';
   const textareaRect = textareaRef.current?.getBoundingClientRect();
   const commandMenuPosition = {
     top: textareaRect ? Math.max(16, textareaRect.top - 316) : 0,
@@ -300,8 +303,8 @@ export default function ChatComposer({
               onFocus={() => onInputFocusChange?.(true)}
               onBlur={() => onInputFocusChange?.(false)}
               onInput={onTextareaInput}
-              placeholder={placeholder}
-              disabled={isLoading}
+              placeholder={hasSandbox ? placeholder : "Create a sandbox first to start chatting"}
+              disabled={isLoading || !hasSandbox}
               className="chat-input-placeholder block max-h-[40vh] min-h-[50px] w-full resize-none overflow-y-auto rounded-2xl bg-transparent py-1.5 pl-12 pr-20 text-base leading-6 text-foreground placeholder-muted-foreground/50 transition-all duration-200 focus:outline-none disabled:opacity-50 sm:max-h-[300px] sm:min-h-[80px] sm:py-4 sm:pr-40"
               style={{ height: '50px' }}
             />
