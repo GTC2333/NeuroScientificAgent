@@ -1,4 +1,10 @@
 // MAS API Service - Communication with MAS Backend
+// ⚠️ DEPRECATED: This service is deprecated and will be removed in a future version.
+// Use the main chat interface instead.
+// All MAS functionality has been superseded by the main Claude Code UI chat.
+/**
+ * @deprecated Use the main chat API instead (src/utils/api.js)
+ */
 const API_BASE = '/api';
 
 export const masApi = {

@@ -113,9 +113,10 @@ def delete_session(session_id: str) -> bool:
 
 def verify_session_access(session_id: str, user_id: str) -> bool:
     """Verify user has access to session"""
-    from src.services.sandbox_manager import verify_sandbox_access
+    from src.services.sandbox_service import get_sandbox_service
 
     session = get_session(session_id)
     if not session:
         return False
-    return verify_sandbox_access(session['sandbox_id'], user_id)
+    service = get_sandbox_service()
+    return service.verify_access(session['sandbox_id'], user_id)

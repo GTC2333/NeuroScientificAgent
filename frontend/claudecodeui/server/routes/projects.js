@@ -17,9 +17,9 @@ function sanitizeGitError(message, token) {
 
 // Read workspace root from config file
 async function getWorkspaceRoot() {
-  // Config file is at scientific_agent/.claude/settings.json
+  // Config file is at scientific_agent/claude/settings.json (no dot prefix)
   // From server/routes/, go up 4 levels to scientific_agent
-  const configPath = path.resolve(__dirname, '../../../../.claude/settings.json');
+  const configPath = path.resolve(__dirname, '../../../../claude/settings.json');
   try {
     const content = await fs.readFile(configPath, 'utf-8');
     const config = JSON.parse(content);
@@ -62,7 +62,6 @@ export const FORBIDDEN_PATHS = [
   '/sys',
   '/var',
   '/boot',
-  '/root',
   '/lib',
   '/lib64',
   '/opt',

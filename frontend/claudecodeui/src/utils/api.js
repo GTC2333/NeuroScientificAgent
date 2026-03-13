@@ -1,4 +1,5 @@
 import { IS_PLATFORM } from "../constants/config";
+import logger from "./logger";
 
 // Utility function for authenticated API calls
 export const authenticatedFetch = (url, options = {}) => {
@@ -15,12 +16,21 @@ export const authenticatedFetch = (url, options = {}) => {
     defaultHeaders['Authorization'] = `Bearer ${token}`;
   }
 
+  const method = options.method || 'GET';
+  logger.apiRequest(method, url, !!token);
+
   return fetch(url, {
     ...options,
     headers: {
       ...defaultHeaders,
       ...options.headers,
     },
+  }).then(response => {
+    logger.apiResponse(method, url, response.status, !response.ok ? response.statusText : null);
+    return response;
+  }).catch(error => {
+    logger.apiResponse(method, url, 0, error.message);
+    throw error;
   });
 };
 
@@ -29,22 +39,91 @@ export const api = {
   // Auth endpoints (no token required)
   auth: {
     status: () => fetch('/api/auth/status'),
-    login: (username, password) => fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    }),
-    register: (username, password) => fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    }),
-    user: () => authenticatedFetch('/api/auth/user'),
+    login: async (username, password) => {
+      logger.debug('Auth', 'Login attempt for user:', username);
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      // Transform response to match expected format (token -> access_token)
+      if (response.ok) {
+        const data = await response.json();
+        logger.info('Auth', 'Login successful for user:', username);
+        return new Response(JSON.stringify({
+          token: data.access_token,
+          user: data.user
+        }), {
+          status: response.status,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const errorText = await response.clone().text();
+      logger.error('Auth', 'Login failed:', errorText);
+      return response;
+    },
+    register: async (username, password) => {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      // Transform response to match expected format (token -> access_token)
+      if (response.ok) {
+        const data = await response.json();
+        return new Response(JSON.stringify({
+          token: data.access_token,
+          user: data.user
+        }), {
+          status: response.status,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return response;
+    },
+    user: () => authenticatedFetch('/api/auth/me'),
     logout: () => authenticatedFetch('/api/auth/logout', { method: 'POST' }),
+  },
+
+  // Sandboxes
+  sandboxes: {
+    list: () => authenticatedFetch('/api/sandboxes'),
+    create: (name) => authenticatedFetch('/api/sandboxes', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+    get: (id) => authenticatedFetch(`/api/sandboxes/${id}`),
+    delete: (id) => authenticatedFetch(`/api/sandboxes/${id}`, { method: 'DELETE' }),
+    start: (id) => authenticatedFetch(`/api/sandboxes/${id}/start`, { method: 'POST' }),
+    stop: (id) => authenticatedFetch(`/api/sandboxes/${id}/stop`, { method: 'POST' }),
+  },
+
+  // Sessions
+  sessions: {
+    list: (sandboxId) => {
+      const url = sandboxId ? `/api/sessions?sandbox_id=${sandboxId}` : '/api/sessions';
+      return authenticatedFetch(url);
+    },
+    create: (title, sandboxId) => authenticatedFetch('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ title, sandbox_id: sandboxId }),
+    }),
+    get: (id) => authenticatedFetch(`/api/sessions/${id}`),
+    delete: (id) => authenticatedFetch(`/api/sessions/${id}`, { method: 'DELETE' }),
+    updateMessages: (id, messages) => authenticatedFetch(`/api/sessions/${id}/messages`, {
+      method: 'PUT',
+      body: JSON.stringify(messages),
+    }),
   },
 
   // Protected endpoints
   // config endpoint removed - no longer needed (frontend uses window.location)
+
+  // Workspace config
+  workspaceConfig: () => fetch('/api/config/workspace'),
+
   projects: () => authenticatedFetch('/api/projects'),
   sessions: (projectName, limit = 5, offset = 0) =>
     authenticatedFetch(`/api/projects/${projectName}/sessions?limit=${limit}&offset=${offset}`),

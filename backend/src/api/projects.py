@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from src.api.auth import get_current_user, UserResponse
 from src.api.sandboxes import load_sandboxes, load_sessions, create_sandbox as create_sandbox_db
+from src.api.sessions import _normalize_session
 
 logger = logging.getLogger("MAS.Projects")
 router = APIRouter()
@@ -46,23 +47,23 @@ async def list_projects(current_user: UserResponse = Depends(get_current_user)) 
 
     projects = []
     for sandbox in user_sandboxes:
-        # Get sessions for this sandbox
-        sandbox_sessions = [
-            ProjectSession(
-                id=session["id"],
-                title=session["title"],
-                created_at=session["created_at"],
-                updated_at=session["updated_at"]
-            )
-            for session in sessions.values()
-            if session["sandbox_id"] == sandbox["id"]
-        ]
+        # Get sessions for this sandbox (handle both camelCase and snake_case keys)
+        sandbox_sessions = []
+        for session in sessions.values():
+            s = _normalize_session(dict(session))  # normalize snake_case → camelCase
+            if s.get("sandboxId") == sandbox["id"]:
+                sandbox_sessions.append(ProjectSession(
+                    id=s["id"],
+                    title=s.get("title", "New Chat"),
+                    created_at=s.get("createdAt", ""),
+                    updated_at=s.get("updatedAt", ""),
+                ))
 
         projects.append(Project(
             name=sandbox["id"],
             displayName=sandbox["name"],
             fullPath=sandbox["workspace_path"],
-            sessions=sandbox_sessions
+            sessions=sandbox_sessions,
         ))
 
     return projects
@@ -102,7 +103,7 @@ async def create_workspace(
 
     # Copy .claude directory if exists
     project_root = user_workspace.parent.parent.parent.parent
-    project_claude_dir = project_root / ".claude"
+    project_claude_dir = project_root / "claude"
     if project_claude_dir.exists():
         workspace_claude = user_workspace / ".claude"
         if not workspace_claude.exists():
@@ -153,20 +154,214 @@ async def get_project(
         raise HTTPException(status_code=403, detail="Access denied")
 
     sessions = load_sessions()
-    sandbox_sessions = [
-        ProjectSession(
-            id=session["id"],
-            title=session["title"],
-            created_at=session["created_at"],
-            updated_at=session["updated_at"]
-        )
-        for session in sessions.values()
-        if session["sandbox_id"] == sandbox["id"]
-    ]
+    sandbox_sessions = []
+    for session in sessions.values():
+        s = _normalize_session(dict(session))
+        if s.get("sandboxId") == sandbox["id"]:
+            sandbox_sessions.append(ProjectSession(
+                id=s["id"],
+                title=s.get("title", "New Chat"),
+                created_at=s.get("createdAt", ""),
+                updated_at=s.get("updatedAt", ""),
+            ))
 
     return Project(
         name=sandbox["id"],
         displayName=sandbox["name"],
         fullPath=sandbox["workspace_path"],
-        sessions=sandbox_sessions
+        sessions=sandbox_sessions,
     )
+
+
+@router.get("/projects/{project_id}/sessions/{session_id}/messages")
+async def get_session_messages(
+    project_id: str,
+    session_id: str,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Get messages for a session, with optional pagination"""
+    sandboxes = load_sandboxes()
+    sandbox = sandboxes.get(project_id)
+
+    if not sandbox:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if sandbox["user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    sessions = load_sessions()
+    session = sessions.get(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    s = _normalize_session(dict(session))
+    if s.get("sandboxId") != project_id:
+        raise HTTPException(status_code=403, detail="Session does not belong to this project")
+
+    raw_messages = session.get("messages", [])
+
+    # Convert to the format the frontend expects
+    messages = []
+    for msg in raw_messages:
+        messages.append({
+            "role": msg.get("role", "user"),
+            "content": msg.get("content", ""),
+            "timestamp": msg.get("timestamp", s.get("createdAt", "")),
+        })
+
+    total = len(messages)
+
+    if limit is not None:
+        # Paginate: return `limit` messages starting from end minus offset
+        start = max(0, total - offset - limit)
+        end = max(0, total - offset)
+        page = messages[start:end]
+        has_more = start > 0
+    else:
+        page = messages
+        has_more = False
+
+    return {
+        "messages": page,
+        "total": total,
+        "hasMore": has_more,
+    }
+
+
+@router.get("/projects/{project_id}/sessions/{session_id}/token-usage")
+async def get_session_token_usage(
+    project_id: str,
+    session_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Return token usage stats for a session (stub)"""
+    return {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "totalTokens": 0,
+        "costUsd": 0.0,
+    }
+
+
+@router.delete("/projects/{project_id}/sessions/{session_id}")
+async def delete_project_session(
+    project_id: str,
+    session_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Delete a session from a project"""
+    from src.api.sandboxes import save_sessions
+
+    sandboxes = load_sandboxes()
+    sandbox = sandboxes.get(project_id)
+
+    if not sandbox:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if sandbox["user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    sessions = load_sessions()
+    session = sessions.get(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    s = _normalize_session(dict(session))
+    if s.get("sandboxId") != project_id:
+        raise HTTPException(status_code=403, detail="Session does not belong to this project")
+
+    # Delete the session
+    del sessions[session_id]
+    save_sessions(sessions)
+
+    logger.info(f"[projects] Deleted session {session_id} from project {project_id}")
+    return {"status": "ok", "message": "Session deleted"}
+
+
+@router.delete("/projects/{project_id}")
+async def delete_project(
+    project_id: str,
+    force: bool = False,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Delete a project (sandbox) and all its sessions"""
+    from src.api.sandboxes import save_sandboxes, save_sessions
+    import shutil
+
+    sandboxes = load_sandboxes()
+    sandbox = sandboxes.get(project_id)
+
+    if not sandbox:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if sandbox["user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Delete all sessions in this sandbox
+    sessions = load_sessions()
+    session_ids_to_delete = [
+        sid for sid, session in sessions.items()
+        if _normalize_session(dict(session)).get("sandboxId") == project_id
+    ]
+
+    for session_id in session_ids_to_delete:
+        del sessions[session_id]
+
+    save_sessions(sessions)
+
+    # Delete workspace directory if force=true
+    if force:
+        workspace_path = Path(sandbox["workspace_path"])
+        if workspace_path.exists():
+            shutil.rmtree(workspace_path)
+            logger.info(f"[projects] Deleted workspace directory {workspace_path}")
+
+    # Delete the sandbox
+    del sandboxes[project_id]
+    save_sandboxes(sandboxes)
+
+    logger.info(f"[projects] Deleted project {project_id} (force={force})")
+    return {"status": "ok", "message": "Project deleted"}
+
+
+@router.get("/projects/{project_id}/files")
+async def list_project_files(
+    project_id: str,
+    path: str = "",
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """List files in a project's workspace directory"""
+    sandboxes = load_sandboxes()
+    sandbox = sandboxes.get(project_id)
+
+    if not sandbox:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if sandbox["user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    workspace_path = Path(sandbox["workspace_path"])
+    target = (workspace_path / path).resolve()
+
+    # Security: ensure target is inside workspace
+    try:
+        target.relative_to(workspace_path.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not target.exists():
+        return {"files": [], "path": path}
+
+    files = []
+    try:
+        for entry in sorted(target.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
+            files.append({
+                "name": entry.name,
+                "path": str(entry.relative_to(workspace_path)),
+                "type": "directory" if entry.is_dir() else "file",
+                "size": entry.stat().st_size if entry.is_file() else 0,
+            })
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    # Return as array — frontend (useFileMentions.tsx) expects ProjectFileNode[]
+    return files
+

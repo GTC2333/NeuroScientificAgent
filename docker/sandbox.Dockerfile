@@ -1,14 +1,15 @@
 # ===========================================
 # Sandbox Container Dockerfile
 # ===========================================
-# Purpose: Isolated execution environment for Claude Code CLI
+# Purpose: Isolated execution environment with SDK agentic loop
 
 FROM python:3.11-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    WORKSPACE=/workspace
 
 WORKDIR /app
 
@@ -16,40 +17,22 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
-    wget \
-    build-essential \
-    # For Claude Code CLI
-    sudo \
-    jq \
-    # For potential Node.js tools
-    nodejs \
-    npm \
+    grep \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY docker/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY docker/sandbox-requirements.txt .
+RUN pip install --no-cache-dir -r sandbox-requirements.txt
 
-# Install Claude Code CLI (stable version)
-RUN curl -fsSL https://raw.githubusercontent.com/anthropics/claude-code/main/install.sh | sh
-
-# Verify Claude Code installation
-RUN claude --version
-
-# Copy sandbox-specific files
-COPY docker/sandbox-entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# Copy .claude directory and sandbox API
-COPY .claude/ ./.claude/
+# Copy sandbox code and claude config
 COPY sandbox/ ./sandbox/
-COPY config.yaml .
+COPY claude/ ./claude/
 
 # Create workspace directory
 RUN mkdir -p /workspace
 
-# Expose API port (for sandbox API server)
+# Expose API port
 EXPOSE 9002
 
-# Entry point
-ENTRYPOINT ["/entrypoint.sh"]
+# Start sandbox API
+CMD ["python", "-m", "uvicorn", "sandbox.api:app", "--host", "0.0.0.0", "--port", "9002"]

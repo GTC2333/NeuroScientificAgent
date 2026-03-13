@@ -13,14 +13,18 @@ export default defineConfig(({ command, mode }) => {
 
   // MAS Backend URL - configurable via env
   const masBackendUrl = env.MAS_BACKEND_URL || 'http://localhost:9000'
+  const expressServerUrl = 'http://localhost:3001'
 
   return {
     plugins: [react()],
     server: {
       host,
-      port: parseInt(env.VITE_PORT) || 5173,
+      port: parseInt(env.VITE_PORT) || 9001,
       proxy: {
-        // MAS Backend API
+        // Forward /api/commands and /api/taskmaster to Express server (port 3001)
+        // All other /api routes go to FastAPI backend (port 9000)
+        '/api/commands': expressServerUrl,
+        '/api/taskmaster': expressServerUrl,
         '/api': masBackendUrl,
         // WebSocket for streaming responses
         '/ws': {

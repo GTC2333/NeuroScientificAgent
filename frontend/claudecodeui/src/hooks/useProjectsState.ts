@@ -235,7 +235,9 @@ export function useProjectsState({
         if (changedSessionId === selectedSession.id) {
           const isSessionActive = activeSessions.has(selectedSession.id);
 
-          if (!isSessionActive) {
+          // Only reload messages if the session is still active (i.e., we're currently working on it).
+          // If the session is inactive, it means we've already completed the work, so no need to reload.
+          if (isSessionActive) {
             setExternalMessageUpdate((prev) => prev + 1);
           }
         }

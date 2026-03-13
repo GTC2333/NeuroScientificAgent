@@ -1,9 +1,28 @@
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
 import { userDb } from '../database/db.js';
 import { IS_PLATFORM } from '../constants/config.js';
 
+// Default platform user credentials
+const PLATFORM_DEFAULT_USERNAME = 'admin';
+const PLATFORM_DEFAULT_PASSWORD = 'admin';
+
 // Get JWT secret from environment or use default (for development)
 const JWT_SECRET = process.env.JWT_SECRET || 'claude-ui-dev-secret-change-in-production';
+
+// Helper to get or create default platform user
+const getOrCreatePlatformUser = () => {
+  let user = userDb.getFirstUser();
+  if (user) {
+    return user;
+  }
+  // Create default user if none exists in platform mode
+  console.log('[INFO] Platform mode: Creating default user');
+  const passwordHash = bcrypt.hashSync(PLATFORM_DEFAULT_PASSWORD, 12);
+  user = userDb.createUser(PLATFORM_DEFAULT_USERNAME, passwordHash);
+  console.log('[INFO] Platform mode: Default user created (username: admin, password: admin)');
+  return user;
+};
 
 // Optional API key middleware
 const validateApiKey = (req, res, next) => {
@@ -21,18 +40,15 @@ const validateApiKey = (req, res, next) => {
 
 // JWT authentication middleware
 const authenticateToken = async (req, res, next) => {
-  // Platform mode:  use single database user
+  // Platform mode: use single database user (auto-create if needed)
   if (IS_PLATFORM) {
     try {
-      const user = userDb.getFirstUser();
-      if (!user) {
-        return res.status(500).json({ error: 'Platform mode: No user found in database' });
-      }
+      const user = getOrCreatePlatformUser();
       req.user = user;
       return next();
     } catch (error) {
       console.error('Platform mode error:', error);
-      return res.status(500).json({ error: 'Platform mode: Failed to fetch user' });
+      return res.status(500).json({ error: 'Platform mode: Failed to get/create user' });
     }
   }
 
@@ -80,14 +96,11 @@ const generateToken = (user) => {
 
 // WebSocket authentication function
 const authenticateWebSocket = (token) => {
-  // Platform mode: bypass token validation, return first user
+  // Platform mode: bypass token validation, use default user (auto-create if needed)
   if (IS_PLATFORM) {
     try {
-      const user = userDb.getFirstUser();
-      if (user) {
-        return { userId: user.id, username: user.username };
-      }
-      return null;
+      const user = getOrCreatePlatformUser();
+      return { userId: user.id, username: user.username };
     } catch (error) {
       console.error('Platform mode WebSocket error:', error);
       return null;

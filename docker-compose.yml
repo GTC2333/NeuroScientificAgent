@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # Main Container - Backend + Frontend
+  # Main Container - Backend + Frontend + Docker Sandbox Manager
   main:
     build:
       context: .
@@ -13,15 +13,14 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
-      - SANDBOX_API_URL=http://sandbox:9002
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-20250514}
       - CLAUDE_TIMEOUT=${CLAUDE_TIMEOUT:-300}
+      - MAS_SANDBOX_IMAGE=${MAS_SANDBOX_IMAGE:-mas-sandbox:latest}
+      - MAS_NETWORK=${MAS_NETWORK:-mas-network}
     volumes:
-      - ./temp_workspace:/app/temp_workspace
       - ./data:/app/data
-    depends_on:
-      sandbox:
-        condition: service_healthy
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - mas-network
     restart: unless-stopped
@@ -31,32 +30,10 @@ services:
       timeout: 10s
       retries: 3
 
-  # Sandbox Container - Isolated Claude Code execution
-  sandbox:
-    build:
-      context: .
-      dockerfile: docker/sandbox.Dockerfile
-    container_name: mas-sandbox
-    ports:
-      - "9002:9002"  # Sandbox API
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - WORKSPACE=/workspace
-    volumes:
-      - sandbox-workspace:/workspace
-    networks:
-      - mas-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9002/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
 networks:
   mas-network:
     driver: bridge
 
 volumes:
-  sandbox-workspace:
+  mas-data:
     driver: local

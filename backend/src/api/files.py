@@ -50,3 +50,42 @@ async def upload_file_api(request: FileUploadRequest):
     """Upload file"""
     success = upload_file(request.path, request.content)
     return {"success": success, "path": request.path}
+
+
+@router.get("/browse-filesystem")
+async def browse_filesystem(path: str = ""):
+    """Browse filesystem for folder suggestions"""
+    import os
+    from pathlib import Path
+
+    # Handle ~ expansion
+    if path.startswith("~"):
+        path = os.path.expanduser(path)
+
+    # If path is empty or doesn't exist, start from home
+    if not path or not Path(path).exists():
+        path = os.path.expanduser("~")
+
+    base_path = Path(path)
+
+    # If it's a file, get parent directory
+    if base_path.is_file():
+        base_path = base_path.parent
+
+    suggestions = []
+    try:
+        if base_path.exists() and base_path.is_dir():
+            for item in sorted(base_path.iterdir()):
+                if item.is_dir() and not item.name.startswith('.'):
+                    suggestions.append({
+                        "name": item.name,
+                        "path": str(item),
+                        "type": "directory"
+                    })
+    except PermissionError:
+        pass
+
+    return {
+        "path": str(base_path),
+        "suggestions": suggestions[:20]  # Limit to 20 suggestions
+    }

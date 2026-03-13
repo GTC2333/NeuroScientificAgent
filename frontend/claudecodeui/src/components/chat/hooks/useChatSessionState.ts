@@ -64,7 +64,7 @@ export function useChatSessionState({
     return [];
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(selectedSession?.id || null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessionMessages, setSessionMessages] = useState<any[]>([]);
   const [isLoadingSessionMessages, setIsLoadingSessionMessages] = useState(false);
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false);
@@ -100,7 +100,10 @@ export function useChatSessionState({
 
   const loadSessionMessages = useCallback(
     async (projectName: string, sessionId: string, loadMore = false, provider: Provider | string = 'claude') => {
+      console.log('[ChatSession] loadSessionMessages called:', { projectName, sessionId, loadMore, provider });
+
       if (!projectName || !sessionId) {
+        console.log('[ChatSession] loadSessionMessages: missing projectName or sessionId');
         return [] as any[];
       }
 
@@ -113,6 +116,7 @@ export function useChatSessionState({
 
       try {
         const currentOffset = loadMore ? messagesOffsetRef.current : 0;
+        console.log('[ChatSession] Calling API with offset:', currentOffset);
         const response = await (api.sessionMessages as any)(
           projectName,
           sessionId,
@@ -125,6 +129,7 @@ export function useChatSessionState({
         }
 
         const data = await response.json();
+        console.log('[ChatSession] API response received, messages count:', data.messages?.length || 0);
         if (isInitialLoad && data.tokenUsage) {
           setTokenBudget(data.tokenUsage);
         }
@@ -181,7 +186,10 @@ export function useChatSessionState({
   }, []);
 
   const convertedMessages = useMemo(() => {
-    return convertSessionMessages(sessionMessages);
+    console.log('[ChatSession] convertedMessages computed, sessionMessages length:', sessionMessages.length);
+    const converted = convertSessionMessages(sessionMessages);
+    console.log('[ChatSession] converted result length:', converted.length);
+    return converted;
   }, [sessionMessages]);
 
   const scrollToBottom = useCallback(() => {
@@ -303,6 +311,7 @@ export function useChatSessionState({
   const isInitialLoadRef = useRef(true);
 
   useEffect(() => {
+    console.log('[ChatSession] Reset effect running, resetting refs');
     if (!searchScrollActiveRef.current) {
       pendingInitialScrollRef.current = true;
       setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
@@ -311,6 +320,7 @@ export function useChatSessionState({
     pendingScrollRestoreRef.current = null;
     prevSessionMessagesLengthRef.current = 0;
     isInitialLoadRef.current = true;
+    console.log('[ChatSession] Reset prevLength to 0, isInitialLoad to true');
     setIsUserScrolledUp(false);
   }, [selectedProject?.name, selectedSession?.id]);
 
@@ -334,11 +344,25 @@ export function useChatSessionState({
 
   useEffect(() => {
     const loadMessages = async () => {
+      console.log('[ChatSession] useEffect triggered', {
+        selectedSessionId: selectedSession?.id,
+        selectedProjectName: selectedProject?.name,
+        currentSessionId,
+        hasSelectedSession: !!selectedSession,
+        hasSelectedProject: !!selectedProject,
+      });
+
       if (selectedSession && selectedProject) {
         const provider = (localStorage.getItem('selected-provider') as Provider) || 'claude';
         isLoadingSessionRef.current = true;
 
         const sessionChanged = currentSessionId !== null && currentSessionId !== selectedSession.id;
+        console.log('[ChatSession] sessionChanged check:', {
+          currentSessionId,
+          selectedSessionId: selectedSession.id,
+          sessionChanged,
+        });
+
         if (sessionChanged) {
           if (!isSystemSessionChange) {
             resetStreamingState();
@@ -371,6 +395,7 @@ export function useChatSessionState({
             });
           }
         } else if (currentSessionId === null) {
+          console.log('[ChatSession] currentSessionId is null, preparing to load messages');
           messagesOffsetRef.current = 0;
           setHasMoreMessages(false);
           setTotalMessages(0);
@@ -384,8 +409,54 @@ export function useChatSessionState({
           }
         }
 
+        // Load messages when currentSessionId is null (initial load on page refresh)
+        if (currentSessionId === null && selectedSession && selectedProject) {
+          console.log('[ChatSession] Loading messages because currentSessionId is null');
+          const sessionProvider = selectedSession.__provider || 'claude';
+          const sessionKey = `${selectedSession.id}:${selectedProject.name}:${sessionProvider}`;
+
+          if (sessionProvider === 'cursor') {
+            console.log('[ChatSession] Loading Cursor session messages');
+            const projectPath = selectedProject.fullPath || selectedProject.path || '';
+            const converted = await loadCursorSessionMessages(projectPath, selectedSession.id);
+            console.log('[ChatSession] Cursor messages loaded:', converted.length);
+            setSessionMessages([]);
+            setChatMessages(converted);
+          } else {
+            console.log('[ChatSession] Loading Claude session messages from API');
+            const messages = await loadSessionMessages(
+              selectedProject.name,
+              selectedSession.id,
+              false,
+              sessionProvider,
+            );
+            console.log('[ChatSession] Claude messages loaded:', messages.length);
+            console.log('[ChatSession] Raw message sample:', JSON.stringify(messages[0], null, 2));
+            console.log('[ChatSession] About to call setSessionMessages with', messages.length, 'messages');
+            setSessionMessages(messages);
+            console.log('[ChatSession] setSessionMessages called');
+            setIsLoading(false);
+          }
+
+          // Update refs to prevent duplicate loading
+          console.log('[ChatSession] Updating currentSessionId to:', selectedSession.id);
+          setCurrentSessionId(selectedSession.id);
+          lastLoadedSessionKeyRef.current = sessionKey;
+
+          // Return to prevent duplicate loading from the code below
+          setTimeout(() => {
+            isLoadingSessionRef.current = false;
+          }, 250);
+          return;
+        }
+
         // Skip loading if session+project+provider hasn't changed
         const sessionKey = `${selectedSession.id}:${selectedProject.name}:${provider}`;
+        console.log('[ChatSession] lastLoadedSessionKey check:', {
+          lastLoaded: lastLoadedSessionKeyRef.current,
+          current: sessionKey,
+          shouldSkip: lastLoadedSessionKeyRef.current === sessionKey,
+        });
         if (lastLoadedSessionKeyRef.current === sessionKey) {
           setTimeout(() => {
             isLoadingSessionRef.current = false;
@@ -416,6 +487,8 @@ export function useChatSessionState({
               selectedSession.__provider || 'claude',
             );
             setSessionMessages(messages);
+            // Mark loading as complete so the messages can be synced to chatMessages
+            setIsLoading(false);
           } else {
             setIsSystemSessionChange(false);
           }
@@ -486,6 +559,8 @@ export function useChatSessionState({
           selectedSession.__provider || 'claude',
         );
         setSessionMessages(messages);
+        // Mark loading as complete so the messages can be synced to chatMessages
+        setIsLoading(false);
 
         const shouldAutoScroll = Boolean(autoScrollToBottom) && isNearBottom();
         if (shouldAutoScroll) {
@@ -535,20 +610,43 @@ export function useChatSessionState({
     // 1. Not currently loading (to avoid overwriting user's just-sent message)
     // 2. SessionMessages actually changed (including from non-empty to empty)
     // 3. Either it's initial load OR sessionMessages increased (new messages from server)
-    if (
-      sessionMessages.length !== prevSessionMessagesLengthRef.current &&
-      !isLoading
-    ) {
+    console.log('[ChatSession] Sync effect running:', {
+      sessionMessagesLength: sessionMessages.length,
+      prevLength: prevSessionMessagesLengthRef.current,
+      isLoading,
+      isInitialLoad: isInitialLoadRef.current,
+    });
+
+    const lengthChanged = sessionMessages.length !== prevSessionMessagesLengthRef.current;
+    console.log('[ChatSession] Sync condition check:', {
+      lengthChanged,
+      isLoading,
+      conditionMet: lengthChanged && !isLoading,
+    });
+
+    if (lengthChanged && !isLoading) {
+      console.log('[ChatSession] Condition met, checking inner condition:', {
+        isInitialLoad: isInitialLoadRef.current,
+        isEmpty: sessionMessages.length === 0,
+        grew: sessionMessages.length > prevSessionMessagesLengthRef.current,
+      });
+
       // Only update if this is initial load, sessionMessages grew, or was cleared to empty
       if (isInitialLoadRef.current || sessionMessages.length === 0 || sessionMessages.length > prevSessionMessagesLengthRef.current) {
+        console.log('[ChatSession] Calling setChatMessages with', convertedMessages.length, 'messages');
+        console.log('[ChatSession] Before setChatMessages, chatMessages length:', chatMessages.length);
         setChatMessages(convertedMessages);
+        console.log('[ChatSession] After setChatMessages called');
         isInitialLoadRef.current = false;
       }
       prevSessionMessagesLengthRef.current = sessionMessages.length;
+    } else {
+      console.log('[ChatSession] Sync skipped - condition not met');
     }
   }, [convertedMessages, sessionMessages.length, isLoading, setChatMessages]);
 
   useEffect(() => {
+    console.log('[ChatSession] chatMessages updated, length:', chatMessages.length, 'selectedProject:', selectedProject?.name);
     if (selectedProject && chatMessages.length > 0) {
       safeLocalStorage.setItem(`chat_messages_${selectedProject.name}`, JSON.stringify(chatMessages));
     }

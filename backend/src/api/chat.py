@@ -63,11 +63,15 @@ async def chat(request: ChatRequest):
     try:
         logger.info(f"[chat] Invoking Claude Code for {agent_type}...")
         logger.info(f"[chat] Call stack: src.api.chat.chat()")
+        history_dicts = None
+        if request.history:
+            history_dicts = [{"role": m.role, "content": m.content} for m in request.history]
         response_text = claude_service.invoke(
             message=request.message,
             agent_type=agent_type,
             session_id=request.session_id,
-            skills=request.selected_skills
+            skills=request.selected_skills,
+            history=history_dicts
         )
         logger.info(f"[chat] Response received, length: {len(response_text)}")
         logger.info(f"[chat] Response content: {response_text[:300]}")
@@ -96,11 +100,15 @@ async def chat_stream(request: ChatRequest):
 
     async def generate():
         try:
+            history_dicts = None
+            if request.history:
+                history_dicts = [{"role": m.role, "content": m.content} for m in request.history]
             for chunk in claude_service.invoke_streaming(
                 message=request.message,
                 agent_type=agent_type,
                 session_id=request.session_id,
-                skills=request.selected_skills
+                skills=request.selected_skills,
+                history=history_dicts
             ):
                 yield f"data: {json.dumps({'text': chunk})}\n\n"
 

@@ -7,6 +7,10 @@ session-created/claude-response/claude-complete response types.
 import asyncio
 import json
 import logging
+import os
+import pty
+import select
+import subprocess
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +22,12 @@ from src.api.auth import decode_token, load_users
 from src.api.sandboxes import load_sandboxes, load_sessions, save_sessions
 from src.api.sessions import _normalize_session
 from src.services.claude_code import get_claude_service
+
+try:
+    import httpx
+    HAS_HTTPX = True
+except ImportError:
+    HAS_HTTPX = False
 
 logger = logging.getLogger("MAS.WebSocket")
 router = APIRouter()
@@ -258,127 +268,216 @@ async def handle_claude_command(user_id: str, message_data: dict):
         logger.info(f"[ws] command: {command[:100]}...")
         logger.info(f"[ws] history length: {len(history)}")
 
-        claude_service = get_claude_service()
+        # Check if sandbox has a Docker container API URL
+        sandboxes_data = load_sandboxes()
+        sandbox_data = sandboxes_data.get(sandbox_id, {})
+        sandbox_api_url = sandbox_data.get("api_url")
+        sandbox_api_key = sandbox_data.get("api_key", "")
+
         response_text = ""
 
-        # Stream chunks as they arrive using a queue to bridge thread/async boundary
-        loop = asyncio.get_event_loop()
-        queue: asyncio.Queue = asyncio.Queue()
+        if sandbox_api_url and HAS_HTTPX:
+            # ===== PROXY MODE: Stream from sandbox container via SSE =====
+            logger.info(f"[ws] Proxy mode: streaming from {sandbox_api_url}")
 
-        def stream_to_queue():
-            """Run streaming in a thread, put each event dict in the async queue"""
-            logger.info(f"[ws] Stream thread starting...")
-            try:
-                event_count = 0
-                for event in claude_service.invoke_streaming(
-                    message=command,
-                    agent_type="principal",
-                    session_id=session_id,
-                    history=history,
-                ):
-                    event_count += 1
-                    logger.info(f"[ws] Thread received event {event_count}, type={event.get('type') if event else None}")
-                    if event:
-                        loop.call_soon_threadsafe(queue.put_nowait, event)
-                logger.info(f"[ws] Thread finished streaming, total events: {event_count}")
-            except Exception as e:
-                logger.error(f"[ws] Thread error during streaming: {e}", exc_info=True)
-                loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(e)})
-            finally:
-                logger.info(f"[ws] Thread sending sentinel (None)")
-                loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
+            request_body = {
+                "message": command,
+                "agent_type": "principal",
+                "session_id": session_id,
+                "history": history,
+            }
+            proxy_headers = {}
+            if sandbox_api_key:
+                proxy_headers["X-Sandbox-API-Key"] = sandbox_api_key
+            logger.debug(f"[ws] Proxy request body: message_len={len(command)}, history_len={len(history)}, has_api_key={bool(sandbox_api_key)}")
 
-        import threading
-        thread = threading.Thread(target=stream_to_queue, daemon=True)
-        thread.start()
-        logger.info(f"[ws] Stream thread started, waiting for events...")
+            event_count = 0
+            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+                async with client.stream(
+                    "POST",
+                    f"{sandbox_api_url}/execute/stream",
+                    json=request_body,
+                    headers=proxy_headers,
+                ) as resp:
+                    if resp.status_code != 200:
+                        error_body = await resp.aread()
+                        raise RuntimeError(
+                            f"Sandbox returned HTTP {resp.status_code}: {error_body.decode()[:500]}"
+                        )
+                    logger.info(f"[ws] Proxy SSE connection established (HTTP {resp.status_code})")
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        try:
+                            event = json.loads(line[6:])
+                        except json.JSONDecodeError:
+                            logger.warning(f"[ws] Proxy: bad SSE JSON: {line[:200]}")
+                            continue
 
-        event_count = 0
-        while True:
-            event = await queue.get()
-            logger.info(f"[ws] Main loop got event from queue: {event is not None}")
-            if event is None:
-                logger.info(f"[ws] Received sentinel, breaking loop")
-                break
-            event_count += 1
+                        event_type = event.get("type", "")
+                        event_count += 1
+                        logger.debug(f"[ws] Proxy event #{event_count}: type={event_type}")
 
-            event_type = event.get("type", "")
+                        if event_type == "text":
+                            text = event.get("text", "")
+                            response_text += text
+                            await manager.send_to_user(user_id, {
+                                "type": "claude-response",
+                                "sessionId": session_id,
+                                "data": {
+                                    "type": "content_block_delta",
+                                    "delta": {"text": text},
+                                },
+                            })
 
-            if event_type == "text":
-                # Stream text chunk to frontend (same format as before)
-                text = event.get("text", "")
-                response_text += text
-                logger.info(f"[ws] Sending text event {event_count} to frontend, length={len(text)}")
-                await manager.send_to_user(user_id, {
-                    "type": "claude-response",
-                    "sessionId": session_id,
-                    "data": {
-                        "type": "content_block_delta",
-                        "delta": {"text": text},
-                    },
-                })
+                        elif event_type == "tool_use":
+                            await manager.send_to_user(user_id, {
+                                "type": "claude-response",
+                                "sessionId": session_id,
+                                "data": {
+                                    "message": {
+                                        "content": [{
+                                            "type": "tool_use",
+                                            "id": event.get("id"),
+                                            "name": event.get("name"),
+                                            "input": event.get("input", {}),
+                                        }]
+                                    }
+                                },
+                            })
 
-            elif event_type == "tool_use":
-                # Send tool_use as a message with content array
-                logger.info(f"[ws] Sending tool_use event: {event.get('name')} with id {event.get('id')}")
-                await manager.send_to_user(user_id, {
-                    "type": "claude-response",
-                    "sessionId": session_id,
-                    "data": {
-                        "message": {
-                            "content": [{
-                                "type": "tool_use",
-                                "id": event.get("id"),
-                                "name": event.get("name"),
-                                "input": event.get("input", {}),
-                            }]
-                        }
-                    },
-                })
+                        elif event_type == "tool_result":
+                            await manager.send_to_user(user_id, {
+                                "type": "claude-response",
+                                "sessionId": session_id,
+                                "data": {
+                                    "message": {
+                                        "role": "user",
+                                        "content": [{
+                                            "type": "tool_result",
+                                            "tool_use_id": event.get("tool_use_id"),
+                                            "content": event.get("content", ""),
+                                            "is_error": event.get("is_error", False),
+                                        }]
+                                    }
+                                },
+                            })
 
-            elif event_type == "tool_result":
-                # Send tool_result as a user-role message with content array
-                logger.info(f"[ws] Sending tool_result event for tool_use_id: {event.get('tool_use_id')}")
-                await manager.send_to_user(user_id, {
-                    "type": "claude-response",
-                    "sessionId": session_id,
-                    "data": {
-                        "message": {
-                            "role": "user",
-                            "content": [{
-                                "type": "tool_result",
-                                "tool_use_id": event.get("tool_use_id"),
-                                "content": event.get("content", ""),
-                                "is_error": event.get("is_error", False),
-                            }]
-                        }
-                    },
-                })
+                        elif event_type == "status":
+                            await manager.send_to_user(user_id, {
+                                "type": "claude-status",
+                                "sessionId": session_id,
+                                "data": {"message": event.get("message", "")},
+                            })
 
-            elif event_type == "status":
-                logger.info(f"[ws] Sending status: {event.get('message')}")
-                await manager.send_to_user(user_id, {
-                    "type": "claude-status",
-                    "sessionId": session_id,
-                    "data": {"message": event.get("message", "")},
-                })
+                        elif event_type == "error":
+                            await manager.send_to_user(user_id, {
+                                "type": "claude-error",
+                                "sessionId": session_id,
+                                "error": event.get("message", "Unknown error"),
+                            })
 
-            elif event_type == "error":
-                logger.error(f"[ws] Received error event: {event.get('message')}")
-                await manager.send_to_user(user_id, {
-                    "type": "claude-error",
-                    "sessionId": session_id,
-                    "error": event.get("message", "Unknown error"),
-                })
+            logger.info(f"[ws] Proxy mode complete: {event_count} events received")
 
-        logger.info(f"[ws] All events received, total: {event_count}, response length: {len(response_text)}")
-        logger.info(f"[ws] >>> COMPLETE RESPONSE (length={len(response_text)}):")
-        logger.info(f"[ws] ---RESPONSE START---")
-        logger.info(response_text[:1000] if len(response_text) > 1000 else response_text)
-        logger.info(f"[ws] ---RESPONSE END---")
+        else:
+            # ===== LOCAL MODE: Fallback to local execution (dev mode, no Docker) =====
+            logger.info(f"[ws] Local mode: executing via ClaudeSDKService")
+
+            claude_service = get_claude_service()
+
+            # Stream chunks via queue to bridge thread/async boundary
+            loop = asyncio.get_event_loop()
+            queue: asyncio.Queue = asyncio.Queue()
+
+            def stream_to_queue():
+                try:
+                    for event in claude_service.invoke_streaming(
+                        message=command,
+                        agent_type="principal",
+                        session_id=session_id,
+                        history=history,
+                    ):
+                        if event:
+                            loop.call_soon_threadsafe(queue.put_nowait, event)
+                except Exception as e:
+                    logger.error(f"[ws] Thread error: {e}", exc_info=True)
+                    loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(e)})
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            import threading
+            thread = threading.Thread(target=stream_to_queue, daemon=True)
+            thread.start()
+
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+
+                event_type = event.get("type", "")
+
+                if event_type == "text":
+                    text = event.get("text", "")
+                    response_text += text
+                    await manager.send_to_user(user_id, {
+                        "type": "claude-response",
+                        "sessionId": session_id,
+                        "data": {
+                            "type": "content_block_delta",
+                            "delta": {"text": text},
+                        },
+                    })
+
+                elif event_type == "tool_use":
+                    await manager.send_to_user(user_id, {
+                        "type": "claude-response",
+                        "sessionId": session_id,
+                        "data": {
+                            "message": {
+                                "content": [{
+                                    "type": "tool_use",
+                                    "id": event.get("id"),
+                                    "name": event.get("name"),
+                                    "input": event.get("input", {}),
+                                }]
+                            }
+                        },
+                    })
+
+                elif event_type == "tool_result":
+                    await manager.send_to_user(user_id, {
+                        "type": "claude-response",
+                        "sessionId": session_id,
+                        "data": {
+                            "message": {
+                                "role": "user",
+                                "content": [{
+                                    "type": "tool_result",
+                                    "tool_use_id": event.get("tool_use_id"),
+                                    "content": event.get("content", ""),
+                                    "is_error": event.get("is_error", False),
+                                }]
+                            }
+                        },
+                    })
+
+                elif event_type == "status":
+                    await manager.send_to_user(user_id, {
+                        "type": "claude-status",
+                        "sessionId": session_id,
+                        "data": {"message": event.get("message", "")},
+                    })
+
+                elif event_type == "error":
+                    await manager.send_to_user(user_id, {
+                        "type": "claude-error",
+                        "sessionId": session_id,
+                        "error": event.get("message", "Unknown error"),
+                    })
+
+        logger.info(f"[ws] Response complete, length: {len(response_text)}")
 
         # Send content_block_stop
-        logger.info(f"[ws] Sending content_block_stop")
         await manager.send_to_user(user_id, {
             "type": "claude-response",
             "sessionId": session_id,
@@ -388,13 +487,10 @@ async def handle_claude_command(user_id: str, message_data: dict):
         })
 
         # Save user message first (before assistant, so history is correct)
-        logger.info(f"[ws] Saving messages to session...")
         save_message_to_session(session_id, "user", command)
-        # Save assistant response
         save_message_to_session(session_id, "assistant", response_text)
 
         # Send claude-complete
-        logger.info(f"[ws] Sending claude-complete message")
         await manager.send_to_user(user_id, {
             "type": "claude-complete",
             "sessionId": session_id,
@@ -503,3 +599,267 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(default=""
     except Exception as e:
         logger.error(f"[ws] Error: {e}", exc_info=True)
         manager.disconnect(user_id)
+
+
+# ============ Shell WebSocket Endpoint ============
+
+class ShellConnection:
+    """Manage a single shell/PTY connection"""
+
+    def __init__(self, websocket: WebSocket, user_id: str):
+        self.websocket = websocket
+        self.user_id = user_id
+        self.master_fd = None
+        self.process = None
+        self.task = None
+
+    async def handle(self):
+        """Handle shell WebSocket connection"""
+        try:
+            await self.websocket.accept()
+            logger.info(f"[shell] User {self.user_id} connected")
+
+            while True:
+                data = await self.websocket.receive_text()
+                try:
+                    message = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+
+                msg_type = message.get("type", "")
+                logger.info(f"[shell] Received: {msg_type}")
+
+                if msg_type == "init":
+                    await self.handle_init(message)
+                elif msg_type == "input":
+                    self.handle_input(message)
+                elif msg_type == "resize":
+                    self.handle_resize(message)
+                elif msg_type == "disconnect":
+                    break
+
+        except WebSocketDisconnect:
+            logger.info(f"[shell] User {self.user_id} disconnected")
+        except Exception as e:
+            logger.error(f"[shell] Error: {e}", exc_info=True)
+        finally:
+            self.cleanup()
+
+    async def handle_init(self, message: dict):
+        """Initialize shell process"""
+        project_path = message.get("projectPath", "")
+        session_id = message.get("sessionId")
+        has_session = message.get("hasSession", False)
+        provider = message.get("provider", "plain-shell")
+        cols = message.get("cols", 80)
+        rows = message.get("rows", 24)
+        initial_command = message.get("initialCommand")
+        is_plain_shell = message.get("isPlainShell", False)
+
+        logger.info(f"[shell] Init: project={project_path}, provider={provider}, plain={is_plain_shell}")
+
+        # Validate project path
+        if not project_path:
+            await self.websocket.send_json({
+                "type": "error",
+                "error": "No project path provided"
+            })
+            return
+
+        # Resolve project path
+        project_path = os.path.abspath(project_path)
+        if not os.path.exists(project_path):
+            await self.websocket.send_json({
+                "type": "error",
+                "error": f"Project path does not exist: {project_path}"
+            })
+            return
+
+        # Build shell command based on provider
+        shell_command = self.build_shell_command(
+            provider=provider,
+            project_path=project_path,
+            session_id=session_id,
+            has_session=has_session,
+            initial_command=initial_command,
+            is_plain_shell=is_plain_shell
+        )
+
+        logger.info(f"[shell] Executing: {shell_command}")
+
+        # Start PTY process
+        try:
+            self.master_fd, slave_fd = pty.openpty()
+
+            # Set terminal size
+            import fcntl
+            import termios
+            import struct
+
+            # Create winsize struct with correct dimensions
+            winsize = struct.pack('HHHH', rows, cols, 0, 0)
+            fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
+
+            # Start the shell process
+            self.process = subprocess.Popen(
+                shell_command,
+                shell=True,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=project_path,
+                start_new_session=True,
+                env={**os.environ, "TERM": "xterm-256color"}
+            )
+
+            # Close slave fd in parent
+            os.close(slave_fd)
+
+            # Start reading output in background task
+            self.task = asyncio.create_task(self.read_output())
+
+            logger.info(f"[shell] Shell started with PID: {self.process.pid}")
+
+        except Exception as e:
+            logger.error(f"[shell] Failed to start shell: {e}")
+            await self.websocket.send_json({
+                "type": "error",
+                "error": f"Failed to start shell: {str(e)}"
+            })
+
+    def build_shell_command(self, provider: str, project_path: str, session_id: Optional[str],
+                           has_session: bool, initial_command: Optional[str], is_plain_shell: bool) -> str:
+        """Build the shell command based on provider"""
+
+        if is_plain_shell:
+            # Plain shell mode - just run initial command in project directory
+            if initial_command:
+                return f'cd "{project_path}" && {initial_command}'
+            return f'cd "{project_path}" && $SHELL'
+
+        # Provider-specific commands
+        if provider == "claude" or provider == "anthropic":
+            if session_id:
+                return f'cd "{project_path}" && claude --resume {session_id} || claude'
+            return f'cd "{project_path}" && claude'
+
+        elif provider == "cursor":
+            if session_id:
+                return f'cd "{project_path}" && cursor-agent --resume="{session_id}"'
+            return f'cd "{project_path}" && cursor-agent'
+
+        elif provider == "codex":
+            if session_id:
+                return f'cd "{project_path}" && codex resume "{session_id}" || codex'
+            return f'cd "{project_path}" && codex'
+
+        elif provider == "gemini":
+            if session_id:
+                return f'cd "{project_path}" && gemini --resume="{session_id}"'
+            return f'cd "{project_path}" && gemini'
+
+        else:
+            # Default to plain shell
+            if initial_command:
+                return f'cd "{project_path}" && {initial_command}'
+            return f'cd "{project_path}" && $SHELL'
+
+    async def read_output(self):
+        """Read output from PTY and send to WebSocket"""
+        try:
+            while True:
+                if self.master_fd is None:
+                    break
+
+                # Use select to check if data is available
+                ready, _, _ = select.select([self.master_fd], [], [], 0.1)
+
+                if ready:
+                    try:
+                        data = os.read(self.master_fd, 4096)
+                        if data:
+                            await self.websocket.send_json({
+                                "type": "output",
+                                "data": data.decode("utf-8", errors="replace")
+                            })
+                    except OSError:
+                        break
+
+                # Check if process exited
+                if self.process and self.process.poll() is not None:
+                    # Process exited, send exit code
+                    exit_code = self.process.returncode
+                    await self.websocket.send_json({
+                        "type": "output",
+                        "data": f"\r\nProcess exited with code {exit_code}\r\n"
+                    })
+                    break
+
+                await asyncio.sleep(0.01)
+
+        except Exception as e:
+            logger.error(f"[shell] Error reading output: {e}")
+        finally:
+            self.cleanup()
+
+    def handle_input(self, message: dict):
+        """Forward input to PTY"""
+        data = message.get("data", "")
+        if self.master_fd and data:
+            try:
+                os.write(self.master_fd, data.encode("utf-8"))
+            except OSError as e:
+                logger.error(f"[shell] Error writing input: {e}")
+
+    def handle_resize(self, message: dict):
+        """Handle terminal resize"""
+        if self.master_fd:
+            cols = message.get("cols", 80)
+            rows = message.get("rows", 24)
+            try:
+                import fcntl
+                import termios
+                import struct
+                winsize = struct.pack('HHHH', rows, cols, 0, 0)
+                fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
+            except Exception as e:
+                logger.error(f"[shell] Error resizing terminal: {e}")
+
+    def cleanup(self):
+        """Clean up resources"""
+        if self.master_fd:
+            try:
+                os.close(self.master_fd)
+            except:
+                pass
+            self.master_fd = None
+
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=2)
+            except:
+                try:
+                    self.process.kill()
+                except:
+                    pass
+            self.process = None
+
+
+@router.websocket("/shell")
+async def shell_websocket_endpoint(websocket: WebSocket, token: str = Query(default="")):
+    """WebSocket endpoint for shell/terminal connections.
+
+    Frontend connects to /shell?token=JWT and sends init/input/resize messages.
+    """
+    # Authenticate via token query param
+    user = authenticate_ws_token(token)
+    if not user:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "error": "Unauthorized"})
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+
+    user_id = user["id"]
+    shell_conn = ShellConnection(websocket, user_id)
+    await shell_conn.handle()

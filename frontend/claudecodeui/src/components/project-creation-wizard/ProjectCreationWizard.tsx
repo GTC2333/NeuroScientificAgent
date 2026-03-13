@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { FolderPlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import ErrorBanner from './components/ErrorBanner';
@@ -10,6 +10,7 @@ import WizardProgress from './components/WizardProgress';
 import { useGithubTokens } from './hooks/useGithubTokens';
 import { cloneWorkspaceWithProgress, createWorkspaceRequest } from './data/workspaceApi';
 import { isCloneWorkflow, shouldShowGithubAuthentication } from './utils/pathUtils';
+import { api } from '../../utils/api';
 import type { TokenMode, WizardFormState, WizardStep, WorkspaceType } from './types';
 
 type ProjectCreationWizardProps = {
@@ -36,6 +37,25 @@ export default function ProjectCreationWizard({
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cloneProgress, setCloneProgress] = useState('');
+  const workspaceRootRef = useRef<string>('');
+
+  // Fetch workspace config but don't pre-fill the path
+  useEffect(() => {
+    const fetchWorkspaceConfig = async () => {
+      try {
+        const response = await api.workspaceConfig();
+        if (response.ok) {
+          const config = await response.json();
+          if (config.workspaceRoot) {
+            workspaceRootRef.current = config.workspaceRoot;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch workspace config:', err);
+      }
+    };
+    fetchWorkspaceConfig();
+  }, []);
 
   const shouldLoadTokens =
     step === 2 && shouldShowGithubAuthentication(formState.workspaceType, formState.githubUrl);
@@ -61,7 +81,9 @@ export default function ProjectCreationWizard({
   }, []);
 
   const updateWorkspaceType = useCallback(
-    (workspaceType: WorkspaceType) => updateField('workspaceType', workspaceType),
+    (workspaceType: WorkspaceType) => {
+      updateField('workspaceType', workspaceType);
+    },
     [updateField],
   );
 
@@ -96,6 +118,21 @@ export default function ProjectCreationWizard({
     setStep((previousStep) => (previousStep > 1 ? ((previousStep - 1) as WizardStep) : previousStep));
   }, []);
 
+  // Helper to convert user input path to absolute path
+  const toAbsolutePath = useCallback((userPath: string): string => {
+    const trimmedPath = userPath.trim();
+    // Base path is the temp_workspace directory
+    const workspaceRoot = workspaceRootRef.current;
+    const basePath = workspaceRoot || '/root/claudeagent/scientific_agent/temp_workspace';
+
+    // If user enters absolute path starting with /, prepend our base
+    if (trimmedPath.startsWith('/')) {
+      return basePath + trimmedPath;
+    }
+    // Relative path: prepend base path
+    return basePath + '/' + trimmedPath;
+  }, []);
+
   const handleCreate = useCallback(async () => {
     setIsCreating(true);
     setError(null);
@@ -103,11 +140,12 @@ export default function ProjectCreationWizard({
 
     try {
       const shouldCloneRepository = isCloneWorkflow(formState.workspaceType, formState.githubUrl);
+      const absolutePath = toAbsolutePath(formState.workspacePath);
 
       if (shouldCloneRepository) {
         const project = await cloneWorkspaceWithProgress(
           {
-            workspacePath: formState.workspacePath,
+            workspacePath: absolutePath,
             githubUrl: formState.githubUrl,
             tokenMode: formState.tokenMode,
             selectedGithubToken: formState.selectedGithubToken,
@@ -125,7 +163,7 @@ export default function ProjectCreationWizard({
 
       const project = await createWorkspaceRequest({
         workspaceType: formState.workspaceType,
-        path: formState.workspacePath.trim(),
+        path: absolutePath,
       });
 
       onProjectCreated?.(project);
@@ -139,7 +177,7 @@ export default function ProjectCreationWizard({
     } finally {
       setIsCreating(false);
     }
-  }, [formState, onClose, onProjectCreated, t]);
+  }, [formState, onClose, onProjectCreated, t, toAbsolutePath]);
 
   const shouldCloneRepository = useMemo(
     () => isCloneWorkflow(formState.workspaceType, formState.githubUrl),

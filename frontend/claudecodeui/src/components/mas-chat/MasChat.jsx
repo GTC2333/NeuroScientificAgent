@@ -1,6 +1,28 @@
 // MAS Chat Component - Research Agent Chat Interface
-import { useState, useEffect, useRef } from 'react';
+// ⚠️ DEPRECATED: This component is deprecated and will be removed in a future version.
+// Use the main chat interface (ChatInterface) instead.
+// MAS functionality has been superseded by the main Claude Code UI chat.
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { masApi } from '../../services/mas-api';
+
+// Generate a consistent session ID for this chat instance
+// If no sessionId provided, create a persistent UUID stored in localStorage
+function getMasSessionId(externalSessionId) {
+  const STORAGE_KEY = 'mas_research_session_id';
+
+  // Use external sessionId if provided (from URL route)
+  if (externalSessionId) {
+    return externalSessionId;
+  }
+
+  // Otherwise, use or create a persistent session ID
+  let storedId = localStorage.getItem(STORAGE_KEY);
+  if (!storedId) {
+    storedId = `mas-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem(STORAGE_KEY, storedId);
+  }
+  return storedId;
+}
 
 const AGENT_ROLES = [
   { id: 'principal', name: 'Principal Investigator', icon: '👑', color: 'bg-purple-600' },
@@ -10,7 +32,10 @@ const AGENT_ROLES = [
   { id: 'writer', name: 'Writer', icon: '✍️', color: 'bg-pink-600' },
 ];
 
-export function MasChat({ sessionId }) {
+export function MasChat({ sessionId: externalSessionId }) {
+  // Get a persistent session ID for Claude Code
+  const sessionId = useMemo(() => getMasSessionId(externalSessionId), [externalSessionId]);
+
   const [message, setMessage] = useState('');
   const [agentType, setAgentType] = useState('principal');
   const [selectedSkills, setSelectedSkills] = useState([]);

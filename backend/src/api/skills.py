@@ -10,8 +10,9 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
-# Path to skills directory in the parent project
-SKILLS_DIR = Path(__file__).parent.parent.parent.parent / ".claude" / "skills"
+# Path to skills directory - read from config (temp_workspace/.claude/skills)
+from src.config import get_config as _get_config
+SKILLS_DIR = (Path(__file__).parent.parent.parent.parent / _get_config().project.skills_dir).resolve()
 
 # In-memory storage for session skills (in production, use database)
 _session_skills: Dict[str, List[str]] = {}
@@ -126,14 +127,14 @@ async def list_agents():
     return agents
 
 
-@router.post("/select")
+@router.post("/skills/select")
 async def select_skills(request: SkillsSelectRequest):
     """Select skills for a session"""
     _session_skills[request.session_id] = request.selected_skills
     return {"status": "ok", "selected_skills": request.selected_skills}
 
 
-@router.get("/selected/{session_id}")
+@router.get("/skills/selected/{session_id}")
 async def get_selected_skills(session_id: str):
     """Get selected skills for a session"""
     return {"selected_skills": _session_skills.get(session_id, [])}

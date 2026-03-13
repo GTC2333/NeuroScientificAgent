@@ -13,7 +13,10 @@ type ProtectedRouteProps = {
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, isLoading, needsSetup, hasCompletedOnboarding, refreshOnboardingStatus } = useAuth();
 
+  console.log('[Auth DEBUG] ProtectedRoute render:', { isLoading, needsSetup, user: user?.username ?? null, hasCompletedOnboarding, IS_PLATFORM });
+
   if (isLoading) {
+    console.log('[Auth DEBUG] ProtectedRoute → AuthLoadingScreen');
     return <AuthLoadingScreen />;
   }
 

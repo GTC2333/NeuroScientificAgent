@@ -59,6 +59,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       const websocket = new WebSocket(wsUrl);
 
       websocket.onopen = () => {
+        console.log('[WS-Frontend] WebSocket connected!');
         setIsConnected(true);
         wsRef.current = websocket;
       };
@@ -66,6 +67,8 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       websocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          // DEBUG: Log WebSocket messages to diagnose frontend issues
+          console.log('[WS-Frontend] Received message type:', data.type, 'sessionId:', data.sessionId);
           setLatestMessage(data);
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -73,12 +76,14 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       };
 
       websocket.onclose = () => {
+        console.log('[WS-Frontend] WebSocket disconnected!');
         setIsConnected(false);
         wsRef.current = null;
-        
+
         // Attempt to reconnect after 3 seconds
         reconnectTimeoutRef.current = setTimeout(() => {
           if (unmountedRef.current) return; // Prevent reconnection if unmounted
+          console.log('[WS-Frontend] Attempting to reconnect...');
           connect();
         }, 3000);
       };

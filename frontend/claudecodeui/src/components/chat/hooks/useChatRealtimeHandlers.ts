@@ -201,9 +201,11 @@ export function useChatRealtimeHandlers({
       );
 
     const clearLoadingIndicators = () => {
+      console.log('[Frontend] === CLEARING LOADING INDICATORS ===');
       setIsLoading(false);
       setCanAbortSession(false);
       setClaudeStatus(null);
+      console.log('[Frontend] Loading indicators cleared: isLoading=false, canAbortSession=false, claudeStatus=null');
     };
 
     const clearPendingViewSession = (resolvedSessionId?: string | null) => {
@@ -239,15 +241,20 @@ export function useChatRealtimeHandlers({
     };
 
     const finalizeLifecycleForCurrentView = (...sessionIds: Array<string | null | undefined>) => {
+      console.log('[Frontend] finalizeLifecycleForCurrentView called with:', sessionIds);
       const pendingSessionId = typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
       const resolvedSessionIds = collectSessionIds(...sessionIds, pendingSessionId, pendingViewSessionRef.current?.sessionId);
       const resolvedPrimarySessionId = resolvedSessionIds[0] || null;
 
+      console.log('[Frontend] Flushing streaming state...');
       flushStreamingState();
+      console.log('[Frontend] Clearing loading indicators...');
       clearLoadingIndicators();
+      console.log('[Frontend] Marking sessions as completed...');
       markSessionsAsCompleted(...resolvedSessionIds);
       setPendingPermissionRequests([]);
       clearPendingViewSession(resolvedPrimarySessionId);
+      console.log('[Frontend] finalizeLifecycleForCurrentView DONE');
     };
 
     if (!shouldBypassSessionFilter) {
@@ -748,21 +755,24 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'claude-complete': {
+        console.log('[Frontend] claude-complete received! sessionId:', latestMessage.sessionId, 'currentSessionId:', currentSessionId);
         const pendingSessionId = sessionStorage.getItem('pendingSessionId');
         const completedSessionId =
           latestMessage.sessionId || currentSessionId || pendingSessionId;
 
+        console.log('[Frontend] Calling finalizeLifecycleForCurrentView with sessionId:', completedSessionId);
         finalizeLifecycleForCurrentView(
           completedSessionId,
           currentSessionId,
           selectedSession?.id,
           pendingSessionId,
         );
+        console.log('[Frontend] finalizeLifecycleForCurrentView completed');
 
         if (pendingSessionId && !currentSessionId && latestMessage.exitCode === 0) {
           setCurrentSessionId(pendingSessionId);
           sessionStorage.removeItem('pendingSessionId');
-          console.log('New session complete, ID set to:', pendingSessionId);
+          console.log('[Frontend] New session complete, ID set to:', pendingSessionId);
         }
 
         if (selectedProject && latestMessage.exitCode === 0) {

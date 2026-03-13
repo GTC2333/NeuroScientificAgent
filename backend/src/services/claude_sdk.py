@@ -17,7 +17,6 @@ from src.services.tools import TOOL_DEFINITIONS, execute_tool
 logger = logging.getLogger("MAS.ClaudeSDK")
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-CLAUDE_DIR = PROJECT_ROOT / ".claude"
 
 MAX_TOOL_ITERATIONS = 30  # Safety limit to prevent infinite loops
 

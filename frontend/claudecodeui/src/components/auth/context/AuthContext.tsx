@@ -43,12 +43,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [error, setError] = useState<string | null>(null);
 
   const setSession = useCallback((nextUser: AuthUser, nextToken: string) => {
+    console.log('[Auth DEBUG] setSession called', { nextUser, tokenPrefix: nextToken?.substring(0, 20) });
     setUser(nextUser);
     setToken(nextToken);
     persistToken(nextToken);
   }, []);
 
   const clearSession = useCallback(() => {
+    console.log('[Auth DEBUG] clearSession called', new Error().stack);
     setUser(null);
     setToken(null);
     clearStoredToken();
@@ -78,11 +80,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       setIsLoading(true);
       setError(null);
+      console.log('[Auth DEBUG] checkAuthStatus START, token exists:', !!token);
 
       const statusResponse = await api.auth.status();
       const statusPayload = await parseJsonSafely<AuthStatusPayload>(statusResponse);
+      console.log('[Auth DEBUG] auth/status response:', statusPayload);
 
       if (statusPayload?.needsSetup) {
+        console.log('[Auth DEBUG] needsSetup=true, showing SetupForm');
         setNeedsSetup(true);
         return;
       }
@@ -90,17 +95,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setNeedsSetup(false);
 
       if (!token) {
+        console.log('[Auth DEBUG] no token, skipping user fetch');
         return;
       }
 
+      console.log('[Auth DEBUG] fetching /api/auth/me with token:', token?.substring(0, 20));
       const userResponse = await api.auth.user();
+      console.log('[Auth DEBUG] /api/auth/me response status:', userResponse.status, 'ok:', userResponse.ok);
       if (!userResponse.ok) {
+        const errorBody = await userResponse.clone().text();
+        console.log('[Auth DEBUG] /api/auth/me FAILED, body:', errorBody, '→ clearSession');
         clearSession();
         return;
       }
 
       const userPayload = await parseJsonSafely<AuthUserPayload>(userResponse);
+      console.log('[Auth DEBUG] /api/auth/me payload:', userPayload);
       if (!userPayload?.user) {
+        console.log('[Auth DEBUG] no user in payload → clearSession');
         clearSession();
         return;
       }
@@ -108,7 +120,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setUser(userPayload.user);
       await checkOnboardingStatus();
     } catch (caughtError) {
-      console.error('[Auth] Auth status check failed:', caughtError);
+      console.error('[Auth DEBUG] checkAuthStatus EXCEPTION:', caughtError);
       setError(AUTH_ERROR_MESSAGES.authStatusCheckFailed);
     } finally {
       setIsLoading(false);
@@ -116,6 +128,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [checkOnboardingStatus, clearSession, token]);
 
   useEffect(() => {
+    console.log('[Auth DEBUG] useEffect triggered (checkAuthStatus/checkOnboardingStatus changed)');
     if (IS_PLATFORM) {
       setUser({ username: 'platform-user' });
       setNeedsSetup(false);
@@ -132,21 +145,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
     async (username, password) => {
       try {
         setError(null);
+        console.log('[Auth DEBUG] login() called for user:', username);
         const response = await api.auth.login(username, password);
+        console.log('[Auth DEBUG] login response status:', response.status, 'ok:', response.ok);
         const payload = await parseJsonSafely<AuthSessionPayload>(response);
+        console.log('[Auth DEBUG] login payload:', { token: payload?.token?.substring(0, 20), user: payload?.user });
 
         if (!response.ok || !payload?.token || !payload.user) {
           const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.loginFailed);
+          console.log('[Auth DEBUG] login FAILED:', message);
           setError(message);
           return { success: false, error: message };
         }
 
+        console.log('[Auth DEBUG] login SUCCESS, calling setSession');
         setSession(payload.user, payload.token);
         setNeedsSetup(false);
         await checkOnboardingStatus();
+        console.log('[Auth DEBUG] login complete, returning success');
         return { success: true };
       } catch (caughtError) {
-        console.error('Login error:', caughtError);
+        console.error('[Auth DEBUG] login EXCEPTION:', caughtError);
         setError(AUTH_ERROR_MESSAGES.networkError);
         return { success: false, error: AUTH_ERROR_MESSAGES.networkError };
       }

@@ -1,0 +1,23 @@
+{
+    "defaultMode": "acceptEdits" ,
+    "env": {
+      "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic",
+      "ANTHROPIC_AUTH_TOKEN": "sk-cp--40B2UFnpf3x_Y-PI4UIQeRZZTLhuYsfoJqwWO8S7vsZEXnf5YOCKNnjnG922YR2ArRLWJF3t7yAD9-wYMOQijkVsB5vMQ6NilC3Gq4Yf6REmsH65iCzGyk",
+      "API_TIMEOUT_MS": "3000000",
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+      "ANTHROPIC_MODEL": "MiniMax-M2.5",
+      "ANTHROPIC_SMALL_FAST_MODEL": "MiniMax-M2.5",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL": "MiniMax-M2.5",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL": "MiniMax-M2.5",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL": "MiniMax-M2.5"
+    },
+    "enabledPlugins": {
+      "frontend-design@claude-plugins-official": true,
+      "github@claude-plugins-official": true,
+      "code-review@claude-plugins-official": true,
+      "superpowers@claude-plugins-official": true,
+      "context7@claude-plugins-official": true,
+      "feature-dev@claude-plugins-official": true,
+      "code-simplifier@claude-plugins-official": true
+    }
+  }

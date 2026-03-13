@@ -12,6 +12,21 @@ claude:
 
 project:
   root_dir: "."
-  claude_dir: ".claude"
-  agents_dir: ".claude/agents"
-  skills_dir: ".claude/skills"
+  claude_dir: "temp_workspace/.claude"
+  agents_dir: "temp_workspace/.claude/agents"
+  skills_dir: "temp_workspace/.claude/skills"
+
+sandbox:
+  enabled: true
+  image: "mas-sandbox:latest"
+  network: "mas-network"
+  base_dir: "/root/claudeagent/users"
+  shared_data_dir: "/root/claudeagent/users/shared/data"
+  port_range_start: 30000
+  port_range_end: 39999
+  mem_limit: "512m"
+  cpu_quota: 50000
+  gpu_enabled: false
+  gpu_devices: ""
+  docker_kwargs: {}
+  container_port: 9002

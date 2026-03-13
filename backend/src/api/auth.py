@@ -21,7 +21,15 @@ logger = logging.getLogger("MAS.Auth")
 router = APIRouter()
 
 # Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Configure passlib to skip bcrypt bug detection (workaround for passlib/bcrypt compatibility issue)
+import os
+os.environ['PASSLIB_BUG_DETECT_2G'] = '0'
+
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__ident="2b"  # Use bcrypt identify 2b
+)
 
 # Security
 security = HTTPBearer()
@@ -78,34 +86,44 @@ def save_users(users: dict):
 # ============ Auth Helpers ============
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify password against hash"""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify password against hash - truncate to 72 bytes for bcrypt compatibility"""
+    # bcrypt has a 72-byte limit
+    password_bytes = plain_password.encode('utf-8')[:72]
+    return pwd_context.verify(password_bytes.decode('utf-8', errors='ignore'), hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    """Hash password"""
-    return pwd_context.hash(password)
+    """Hash password - truncate to 72 bytes for bcrypt compatibility"""
+    # bcrypt has a 72-byte limit, truncate if necessary
+    password_bytes = password.encode('utf-8')[:72]
+    return pwd_context.hash(password_bytes.decode('utf-8', errors='ignore'))
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT access token"""
+    import time
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(hours=settings.access_token_expire_hours)
+        expire = datetime.utcnow() + timedelta(hours=settings.auth.access_token_expire_hours)
 
-    to_encode.update({"exp": expire.isoformat()})
-    encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.jwt_algorithm)
+    # Use integer timestamp for exp claim (required by JWT spec)
+    to_encode.update({"exp": int(time.time()) + settings.auth.access_token_expire_hours * 3600})
+    encoded_jwt = jwt.encode(to_encode, settings.auth.secret_key, algorithm=settings.auth.algorithm)
     return encoded_jwt
 
 
 def decode_token(token: str) -> Optional[dict]:
     """Decode and validate JWT token"""
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(token, settings.auth.secret_key, algorithms=[settings.auth.algorithm])
         return payload
-    except JWTError:
+    except JWTError as e:
+        logger.warning(f"[auth] JWT decode failed: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"[auth] JWT decode error: {e}")
         return None
 
 
@@ -216,10 +234,10 @@ async def login(user: UserLogin):
     )
 
 
-@router.get("/auth/me", response_model=UserResponse)
+@router.get("/auth/me")
 async def get_me(current_user: UserResponse = Depends(get_current_user)):
-    """Get current user info"""
-    return current_user
+    """Get current user info - wrapped in {user: ...} for frontend compatibility"""
+    return {"user": current_user}
 
 
 @router.post("/auth/logout")
@@ -232,3 +250,43 @@ async def logout(current_user: UserResponse = Depends(get_current_user)):
 async def auth_status():
     """Check auth status"""
     return {"status": "ok", "needsSetup": False}
+
+
+# ============ User Endpoints (for claudecodeui compatibility) ============
+
+@router.get("/user/onboarding-status")
+async def get_onboarding_status(current_user: UserResponse = Depends(get_current_user)):
+    """Get user onboarding status"""
+    return {"hasCompletedOnboarding": True}
+
+
+@router.post("/user/complete-onboarding")
+async def complete_onboarding(current_user: UserResponse = Depends(get_current_user)):
+    """Mark onboarding as complete"""
+    return {"hasCompletedOnboarding": True}
+
+
+@router.get("/user/git-config")
+async def get_git_config(current_user: UserResponse = Depends(get_current_user)):
+    """Get user git config (placeholder)"""
+    return {"name": "", "email": "", "username": ""}
+
+
+@router.post("/user/git-config")
+async def set_git_config(current_user: UserResponse = Depends(get_current_user)):
+    """Set user git config (placeholder)"""
+    return {"name": "", "email": "", "username": ""}
+
+
+# ============ MCP Utils Endpoints (for claudecodeui compatibility) ============
+
+@router.get("/mcp-utils/taskmaster-server")
+async def get_taskmaster_status(current_user: UserResponse = Depends(get_current_user)):
+    """Get TaskMaster MCP server status (placeholder)"""
+    return {"installed": False, "running": False}
+
+
+@router.get("/taskmaster/installation-status")
+async def get_taskmaster_installation_status():
+    """Get TaskMaster installation status (no auth required)"""
+    return {"installed": False}

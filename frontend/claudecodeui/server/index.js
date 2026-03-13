@@ -347,14 +347,192 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Get workspace config (no authentication required for basic config)
+app.get('/api/config/workspace', async (req, res) => {
+    try {
+        const workspaceRoot = WORKSPACES_ROOT;
+        res.json({
+            workspaceRoot,
+            displayName: 'Workspace'
+        });
+    } catch (error) {
+        console.error('Error getting workspace config:', error);
+        res.status(500).json({ error: 'Failed to get workspace config' });
+    }
+});
+
 // Optional API key validation (if configured)
 app.use('/api', validateApiKey);
 
+// MAS Chat API - Proxy to Python backend
+const MAS_BACKEND_URL = process.env.MAS_BACKEND_URL || 'http://localhost:9000';
+
+app.use('/api/chat', async (req, res) => {
+  try {
+    console.log('[MAS Chat Proxy] Forwarding to Python backend:', req.method, req.path);
+
+    const response = await fetch(`${MAS_BACKEND_URL}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(req.body),
+    });
+
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[MAS Chat Proxy] Error:', error.message);
+    res.status(500).json({ error: 'Failed to connect to MAS backend', details: error.message });
+  }
+});
+
+// Skills API - Proxy to Python backend
+app.use('/api/skills', async (req, res) => {
+  try {
+    const response = await fetch(`${MAS_BACKEND_URL}/api/skills`, {
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[MAS Skills Proxy] Error:', error.message);
+    res.status(500).json({ error: 'Failed to connect to MAS backend' });
+  }
+});
+
+// Agents API - Proxy to Python backend
+app.use('/api/agents', async (req, res) => {
+  try {
+    const response = await fetch(`${MAS_BACKEND_URL}/api/agents`, {
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[MAS Agents Proxy] Error:', error.message);
+    res.status(500).json({ error: 'Failed to connect to MAS backend' });
+  }
+});
+
+// Tasks API - Proxy to Python backend
+app.use('/api/tasks', async (req, res) => {
+  try {
+    const response = await fetch(`${MAS_BACKEND_URL}/api/tasks`, {
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: req.method !== 'GET' ? JSON.stringify(req.body) : undefined,
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[MAS Tasks Proxy] Error:', error.message);
+    res.status(500).json({ error: 'Failed to connect to MAS backend' });
+  }
+});
+
+// Sessions API - Proxy to Python backend
+app.use('/api/sessions', async (req, res) => {
+  try {
+    // Forward full URL path including parameters like /api/sessions/123
+    const url = `${MAS_BACKEND_URL}${req.originalUrl}`;
+
+    const options = {
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    };
+
+    // Forward Authorization header if present
+    if (req.headers.authorization) {
+      options.headers['Authorization'] = req.headers.authorization;
+    }
+
+    // Forward request body for POST/PUT/DELETE
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
+      options.body = JSON.stringify(req.body);
+    }
+
+    const response = await fetch(url, options);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[MAS Sessions Proxy] Error:', error.message);
+    res.status(500).json({ error: 'Failed to connect to MAS backend' });
+  }
+});
+
+// Sandboxes API - Proxy to Python backend
+app.use('/api/sandboxes', async (req, res) => {
+  try {
+    const url = `${MAS_BACKEND_URL}${req.originalUrl}`;
+
+    const options = {
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    };
+
+    if (req.headers.authorization) {
+      options.headers['Authorization'] = req.headers.authorization;
+    }
+
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
+      options.body = JSON.stringify(req.body);
+    }
+
+    const response = await fetch(url, options);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[MAS Sandboxes Proxy] Error:', error.message);
+    res.status(500).json({ error: 'Failed to connect to MAS backend' });
+  }
+});
+
+// Projects API - Proxy to Python backend
+app.use('/api/projects', async (req, res) => {
+  try {
+    const url = `${MAS_BACKEND_URL}${req.originalUrl}`;
+
+    const options = {
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    };
+
+    // Forward Authorization header if present
+    if (req.headers.authorization) {
+      options.headers['Authorization'] = req.headers.authorization;
+    }
+
+    // Forward request body for POST/PUT/DELETE
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
+      options.body = JSON.stringify(req.body);
+    }
+
+    const response = await fetch(url, options);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[MAS Projects Proxy] Error:', error.message);
+    res.status(500).json({ error: 'Failed to connect to MAS backend' });
+  }
+});
+
 // Authentication routes (public)
 app.use('/api/auth', authRoutes);
-
-// Projects API Routes (protected)
-app.use('/api/projects', authenticateToken, projectsRoutes);
 
 // Git API Routes (protected)
 app.use('/api/git', authenticateToken, gitRoutes);

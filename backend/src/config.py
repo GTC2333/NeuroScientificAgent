@@ -52,12 +52,42 @@ class MCPConfig:
 
 
 @dataclass
+class AuthConfig:
+    secret_key: str = "dev-secret-key-change-in-production"
+    access_token_expire_hours: int = 24
+    algorithm: str = "HS256"
+
+
+@dataclass
+class SandboxConfig:
+    enabled: bool = True
+    image: str = "mas-sandbox:latest"
+    network: str = "mas-network"
+    base_dir: str = "/root/claudeagent/users"
+    shared_data_dir: str = "/root/claudeagent/users/shared/data"
+    port_range_start: int = 30000
+    port_range_end: int = 39999
+    mem_limit: str = "512m"
+    cpu_quota: int = 50000
+    gpu_enabled: bool = False
+    gpu_devices: str = ""
+    docker_kwargs: dict = None
+    container_port: int = 9002
+
+    def __post_init__(self):
+        if self.docker_kwargs is None:
+            self.docker_kwargs = {}
+
+
+@dataclass
 class Config:
     server: ServerConfig
     claude: ClaudeConfig
     project: ProjectConfig
     workspace: WorkspaceConfig
     mcp: MCPConfig
+    auth: AuthConfig = AuthConfig()
+    sandbox: SandboxConfig = SandboxConfig()
 
 
 def load_config() -> Config:
@@ -89,8 +119,10 @@ def load_config() -> Config:
     project_cfg = ProjectConfig(**config_data.get('project', {}))
     workspace_cfg = WorkspaceConfig(**config_data.get('workspace', {}))
     mcp_cfg = MCPConfig(**config_data.get('mcp', {}))
+    auth_cfg = AuthConfig(**config_data.get('auth', {}))
+    sandbox_cfg = SandboxConfig(**config_data.get('sandbox', {}))
 
-    return Config(server=server_cfg, claude=claude_cfg, project=project_cfg, workspace=workspace_cfg, mcp=mcp_cfg)
+    return Config(server=server_cfg, claude=claude_cfg, project=project_cfg, workspace=workspace_cfg, mcp=mcp_cfg, auth=auth_cfg, sandbox=sandbox_cfg)
 
 
 def get_config() -> Config:

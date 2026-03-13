@@ -36,6 +36,10 @@ app.add_middleware(
 )
 
 # Include routers
+# IMPORTANT: sandboxes.router must be before sessions.router to avoid route conflicts
+app.include_router(auth.router, prefix="/api", tags=["Auth"])
+app.include_router(sandboxes.router, prefix="/api", tags=["Sandboxes"])
+app.include_router(websocket.router, tags=["WebSocket"])
 app.include_router(chat.router, prefix="/api", tags=["Chat"])
 app.include_router(tasks.router, prefix="/api", tags=["Tasks"])
 app.include_router(skills.router, prefix="/api", tags=["Skills"])
@@ -43,9 +47,6 @@ app.include_router(papers.router, prefix="/api", tags=["Papers"])
 app.include_router(sessions.router, prefix="/api", tags=["Sessions"])
 app.include_router(files.router, prefix="/api", tags=["Files"])
 app.include_router(pdf.router, prefix="/api", tags=["PDF"])
-app.include_router(auth.router, prefix="/api", tags=["Auth"])
-app.include_router(sandboxes.router, prefix="/api", tags=["Sandboxes"])
-app.include_router(websocket.router, tags=["WebSocket"])
 app.include_router(projects.router, prefix="/api", tags=["Projects"])
 
 # In-memory log storage
@@ -121,11 +122,20 @@ async def root():
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize default workspaces on startup"""
+    """Initialize services on startup"""
     from src.api.sandboxes import init_default_workspace
     logger.info("[startup] Initializing default workspace...")
     init_default_workspace()
     logger.info("[startup] Default workspace initialized")
+
+    # Initialize SandboxService and run reconciliation
+    try:
+        from src.services.sandbox_service import get_sandbox_service
+        service = get_sandbox_service()
+        service.reconcile()
+        logger.info("[startup] SandboxService initialized and reconciled")
+    except Exception as e:
+        logger.warning("[startup] SandboxService init skipped: %s", e)
 
 
 @app.get("/health")

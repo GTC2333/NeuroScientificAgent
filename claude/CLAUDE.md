@@ -9,6 +9,7 @@ It coordinates multiple specialized agents to complete complex scientific resear
 
 MAS follows a three-layer architecture:
 
+
 ```
 Layer 1 - System Constitution      (CLAUDE.md)
 Layer 2 - Agent Roles              (.claude/agents/)

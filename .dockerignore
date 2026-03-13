@@ -29,9 +29,14 @@ yarn-error.log
 Dockerfile
 docker-compose*.yml
 
-# Documentation
+# Documentation (keep claude/ .md files for agent definitions)
 docs/plans/
-*.md
+README.md
+DESIGN.md
+MEMORY.md
+CLAUDE.md
+SPEC.md
+LOGGING.md
 
 # OS
 .DS_Store
