@@ -3,10 +3,11 @@
 # ===========================================
 # Purpose: Isolated execution environment with SDK agentic loop
 #
-# Offline build: 如果 docker/offline-deps/ 下有预下载的依赖，
-# 优先使用离线安装。运行 docker/download_deps.sh 预下载。
+# Offline build: 支持两种离线依赖来源:
+#   1. docker/offline-deps/ (构建时 COPY 进镜像)
+#   2. /opt/offline-deps/ (运行时通过 volume 挂载)
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -16,35 +17,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Copy offline apt repo (if available)
-COPY docker/offline-deps/apt-repo/ /tmp/apt-repo/
-
-# Install system dependencies (offline-first)
-RUN set -eux; \
-    if [ -f /tmp/apt-repo/Packages ]; then \
-        echo "[OFFLINE] Using local APT repo..." && \
-        echo "deb [trusted=yes] file:/tmp/apt-repo ./" > /etc/apt/sources.list.d/local.list && \
-        apt-get update && \
-        apt-get install -y --no-install-recommends curl git ripgrep 2>/dev/null || \
-        (rm -f /etc/apt/sources.list.d/local.list && apt-get update && \
-         apt-get install -y --no-install-recommends curl git ripgrep); \
-    else \
-        echo "[ONLINE] Installing from remote repos..." && \
-        apt-get update && \
-        apt-get install -y --no-install-recommends curl git ripgrep; \
-    fi && \
-    rm -rf /var/lib/apt/lists/* /tmp/apt-repo
+# Install system dependencies (one-shot: update + install)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl git ripgrep \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy offline pip wheels (if available)
 COPY docker/offline-deps/pip-wheels/sandbox/ /tmp/pip-wheels/
 
 # Install Python dependencies (offline-first)
 COPY docker/sandbox-requirements.txt .
-RUN if ls /tmp/pip-wheels/*.whl 1>/dev/null 2>&1; then \
-        echo "[OFFLINE] Installing from local pip wheels..." && \
+RUN if [ -d /tmp/pip-wheels ] && ls /tmp/pip-wheels/*.whl 1>/dev/null 2>&1; then \
         pip install --no-cache-dir --no-index --find-links /tmp/pip-wheels -r sandbox-requirements.txt; \
     else \
-        echo "[ONLINE] Installing from PyPI..." && \
         pip install --no-cache-dir -r sandbox-requirements.txt; \
     fi && \
     rm -rf /tmp/pip-wheels

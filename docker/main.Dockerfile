@@ -3,21 +3,18 @@
 # ===========================================
 # Purpose: Backend API + Frontend UI (Nginx) + Docker Sandbox Management
 #
-# Offline build: 如果 docker/offline-deps/ 下有预下载的依赖，
-# 优先使用离线安装，跳过网络下载，大幅加速构建。
-# 运行 docker/download_deps.sh 预下载依赖。
+# Offline build: 支持两种离线依赖来源:
+#   1. docker/offline-deps/ (构建时 COPY 进镜像)
+#   2. /opt/offline-deps/ (运行时通过 volume 挂载)
+#
+# 运行 docker/download_deps.sh 预下载依赖到 docker/offline-deps/
 
 # Stage 1: Python builder
-FROM python:3.11-slim AS python-builder
+FROM python:3.12-slim AS python-builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create virtual environment
+# Create virtual environment (no need for gcc in Stage 1)
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
@@ -26,11 +23,9 @@ COPY docker/offline-deps/pip-wheels/main/ /tmp/pip-wheels/
 COPY docker/requirements.txt .
 
 # Offline-first: try local wheels, fallback to network
-RUN if ls /tmp/pip-wheels/*.whl 1>/dev/null 2>&1; then \
-        echo "[OFFLINE] Installing from local pip wheels..." && \
+RUN if [ -d /tmp/pip-wheels ] && ls /tmp/pip-wheels/*.whl 1>/dev/null 2>&1; then \
         pip install --no-cache-dir --no-index --find-links /tmp/pip-wheels -r requirements.txt; \
     else \
-        echo "[ONLINE] No local wheels found, installing from PyPI..." && \
         pip install --no-cache-dir -r requirements.txt; \
     fi && \
     rm -rf /tmp/pip-wheels
@@ -47,11 +42,8 @@ COPY docker/offline-deps/npm-cache/ /tmp/npm-cache/
 # Install frontend dependencies (offline-first)
 COPY frontend/claudecodeui/package*.json ./
 RUN if [ -f /tmp/npm-cache/node_modules.tar.gz ]; then \
-        echo "[OFFLINE] Extracting cached node_modules..." && \
-        tar xzf /tmp/npm-cache/node_modules.tar.gz && \
-        npm install 2>/dev/null || true; \
+        tar xzf /tmp/npm-cache/node_modules.tar.gz; \
     else \
-        echo "[ONLINE] Running npm ci..." && \
         npm ci; \
     fi && \
     rm -rf /tmp/npm-cache
@@ -62,7 +54,7 @@ RUN npm run build
 
 
 # Stage 3: Production image (Nginx + FastAPI)
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -71,24 +63,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Copy offline apt repo (if available)
-COPY docker/offline-deps/apt-repo/ /tmp/apt-repo/
-
-# Install runtime dependencies (offline-first for apt)
-RUN set -eux; \
-    if [ -f /tmp/apt-repo/Packages ]; then \
-        echo "[OFFLINE] Using local APT repo..." && \
-        echo "deb [trusted=yes] file:/tmp/apt-repo ./" > /etc/apt/sources.list.d/local.list && \
-        apt-get update && \
-        apt-get install -y --no-install-recommends nginx curl docker.io 2>/dev/null || \
-        (rm -f /etc/apt/sources.list.d/local.list && apt-get update && \
-         apt-get install -y --no-install-recommends nginx curl docker.io); \
-    else \
-        echo "[ONLINE] Installing from remote repos..." && \
-        apt-get update && \
-        apt-get install -y --no-install-recommends nginx curl docker.io; \
-    fi && \
-    rm -rf /var/lib/apt/lists/* /tmp/apt-repo
+# Install runtime dependencies (one-shot: update + install)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nginx curl docker.io \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy Python virtual environment from builder
 COPY --from=python-builder /opt/venv /opt/venv

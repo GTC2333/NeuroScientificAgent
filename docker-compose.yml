@@ -23,6 +23,8 @@ services:
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERS_DIR:-/root/claudeagent/users}:/root/claudeagent/users
+      # 挂载统一离线依赖库
+      - ${OFFLINE_DEPS_PATH:-/opt/offline-deps}:/opt/offline-deps:ro
     networks:
       - mas-network
     restart: unless-stopped

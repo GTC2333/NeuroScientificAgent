@@ -17,7 +17,18 @@ die() { log "ERROR: $*"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-OFFLINE_DIR="${SCRIPT_DIR}/offline-deps"
+
+# 支持环境变量覆盖路径
+OFFLINE_DEPS_PATH="${OFFLINE_DEPS_PATH:-/opt/offline-deps}"
+if [[ -d "$OFFLINE_DEPS_PATH" ]]; then
+    # 使用 /opt/offline-deps/ 结构
+    OFFLINE_DIR="$OFFLINE_DEPS_PATH"
+    log "Using shared offline deps: $OFFLINE_DIR"
+else
+    # 回退到 docker/offline-deps/
+    OFFLINE_DIR="${SCRIPT_DIR}/offline-deps"
+    log "Using local offline deps: $OFFLINE_DIR"
+fi
 
 # Proxy config (inherits env or defaults)
 PROXY_URL="${HTTP_PROXY:-${http_proxy:-}}"
@@ -33,6 +44,14 @@ DOCKER_NET="${DOCKER_NET:---network host}"
 # Target: all / pip / apt / npm
 TARGET="${1:-all}"
 
+# Force official PyPI (override pip.conf)
+PIP_INDEX_URL="https://pypi.org/simple"
+PIP_TRUSTED_HOST="pypi.org"
+PIP_EXTRA_ARGS="--index-url=${PIP_INDEX_URL} --trusted-host=${PIP_TRUSTED_HOST}"
+
+# Python version for wheel downloads
+PYTHON_VERSION="3.12"
+
 ############################################
 # 1. Download pip wheels
 ############################################
@@ -43,38 +62,42 @@ download_pip_wheels() {
     log "[pip] Downloading main container wheels..."
     pip download \
         -r "${SCRIPT_DIR}/requirements.txt" \
-        -d "${OFFLINE_DIR}/pip-wheels/main" \
+        -d "${OFFLINE_DIR}/python/cp312/any" \
         --platform manylinux2014_x86_64 \
-        --platform linux_x86_64 \
-        --python-version 3.11 \
+        --platform manylinux_2_17_x86_64 \
+        --python-version ${PYTHON_VERSION} \
         --only-binary=:all: \
+        ${PIP_EXTRA_ARGS} \
         2>&1 || {
         # Fallback: download without platform constraint (gets source dists too)
         log "[pip] Binary-only download incomplete, trying with source packages..."
         pip download \
             -r "${SCRIPT_DIR}/requirements.txt" \
-            -d "${OFFLINE_DIR}/pip-wheels/main" \
+            -d "${OFFLINE_DIR}/python/cp312/any" \
+            ${PIP_EXTRA_ARGS} \
             2>&1
     }
-    log "[pip] Main wheels: $(ls "${OFFLINE_DIR}/pip-wheels/main/" | wc -l) files"
+    log "[pip] Main wheels: $(ls "${OFFLINE_DIR}/python/cp312/any/" | wc -l) files"
 
-    # Sandbox container wheels
+    # Sandbox container wheels (use same cp312/any for simplicity)
     log "[pip] Downloading sandbox container wheels..."
     pip download \
         -r "${SCRIPT_DIR}/sandbox-requirements.txt" \
-        -d "${OFFLINE_DIR}/pip-wheels/sandbox" \
+        -d "${OFFLINE_DIR}/python/cp312/any" \
         --platform manylinux2014_x86_64 \
-        --platform linux_x86_64 \
-        --python-version 3.11 \
+        --platform manylinux_2_17_x86_64 \
+        --python-version ${PYTHON_VERSION} \
         --only-binary=:all: \
+        ${PIP_EXTRA_ARGS} \
         2>&1 || {
         log "[pip] Binary-only download incomplete, trying with source packages..."
         pip download \
             -r "${SCRIPT_DIR}/sandbox-requirements.txt" \
-            -d "${OFFLINE_DIR}/pip-wheels/sandbox" \
+            -d "${OFFLINE_DIR}/python/cp312/any" \
+            ${PIP_EXTRA_ARGS} \
             2>&1
     }
-    log "[pip] Sandbox wheels: $(ls "${OFFLINE_DIR}/pip-wheels/sandbox/" | wc -l) files"
+    log "[pip] Sandbox wheels: $(ls "${OFFLINE_DIR}/python/cp312/any/" | wc -l) files"
 
     log "=== pip wheels download complete ==="
 }
@@ -85,7 +108,7 @@ download_pip_wheels() {
 download_apt_packages() {
     log "=== Downloading apt packages ==="
 
-    local DEB_DIR="${OFFLINE_DIR}/apt-repo/pool/main"
+    local DEB_DIR="${OFFLINE_DIR}/apt/pool/main"
     mkdir -p "$DEB_DIR"
 
     # Main container apt deps: nginx, curl, docker.io
@@ -118,14 +141,14 @@ download_apt_packages() {
 
     # Generate Packages index for local APT repo
     log "[apt] Generating APT repo index..."
-    cd "${OFFLINE_DIR}/apt-repo"
+    cd "${OFFLINE_DIR}/apt"
     if command -v dpkg-scanpackages &>/dev/null; then
         dpkg-scanpackages pool/main /dev/null > Packages 2>/dev/null
         gzip -k -f Packages
     else
         # Use Docker container to generate index
         docker run --rm \
-            -v "${OFFLINE_DIR}/apt-repo:/repo" \
+            -v "${OFFLINE_DIR}/apt:/repo" \
             python:3.11-slim \
             bash -c "
                 apt-get update && apt-get install -y dpkg-dev && \
@@ -146,7 +169,7 @@ download_apt_packages() {
 download_npm_cache() {
     log "=== Downloading npm packages ==="
 
-    local NPM_CACHE_DIR="${OFFLINE_DIR}/npm-cache"
+    local NPM_CACHE_DIR="${OFFLINE_DIR}/node/v20"
     local FRONTEND_DIR="${PROJECT_DIR}/frontend/claudecodeui"
 
     if [[ ! -f "${FRONTEND_DIR}/package.json" ]]; then
@@ -215,10 +238,14 @@ log "Download complete!"
 log "=========================================="
 log "Directory structure:"
 log "  ${OFFLINE_DIR}/"
-log "    ├── pip-wheels/main/       # Main container Python deps"
-log "    ├── pip-wheels/sandbox/    # Sandbox container Python deps"
-log "    ├── apt-repo/              # Local APT repository"
-log "    └── npm-cache/             # Frontend node_modules tarball"
+log "    ├── python/cp312/any/      # Python wheels"
+log "    ├── apt/pool/main/        # APT packages"
+log "    └── node/v20/             # Node modules"
+log ""
+log "Or use legacy structure:"
+log "    ├── pip-wheels/main/       # Main container Python deps (legacy)"
+log "    ├── pip-wheels/sandbox/    # Sandbox container Python deps (legacy)"
+log "    └── npm-cache/             # Frontend node_modules (legacy)"
 log ""
 log "Next: run ./build_images.sh to build with offline deps"
 log "=========================================="
