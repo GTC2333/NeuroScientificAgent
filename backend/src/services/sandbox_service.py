@@ -161,33 +161,37 @@ class SandboxService:
     # ---- User Directory Management ----
 
     def _ensure_user_dirs(self, user_id: str, sandbox_name: str) -> tuple:
-        """Create user directory structure. Returns (workspace_dir, data_dir)."""
+        """Create user directory structure. Returns (workspace_dir, data_dir, sessions_dir, user_home)."""
         base = Path(self.config.base_dir)
-        workspace_dir = base / user_id / "workspaces" / sandbox_name
-        data_dir = base / user_id / "data"
+        user_home = base / user_id
+        workspace_dir = user_home / "workspaces" / sandbox_name
+        data_dir = user_home / "data"
+        sessions_dir = user_home / "sessions"
 
         workspace_dir.mkdir(parents=True, exist_ok=True)
         data_dir.mkdir(parents=True, exist_ok=True)
+        sessions_dir.mkdir(parents=True, exist_ok=True)
 
-        # Copy claude agent definitions to workspace
+        # Copy claude agent definitions to user_home/.claude (for /app/claude mount)
         project_root = Path(__file__).parent.parent.parent.parent
         claude_src = project_root / "claude"
-        claude_dest = workspace_dir / ".claude"
+        claude_dest = user_home / ".claude"
         if claude_src.exists() and not claude_dest.exists():
             import shutil
             shutil.copytree(claude_src, claude_dest, dirs_exist_ok=True)
 
         logger.info("[SandboxService] User dirs ready: workspace=%s", workspace_dir)
-        return str(workspace_dir), str(data_dir)
+        return str(workspace_dir), str(data_dir), str(sessions_dir), str(user_home)
 
     # ---- Docker Environment ----
 
-    def _build_env(self, api_key: str) -> dict:
+    def _build_env(self, api_key: str, username: str = "") -> dict:
         """Build environment variables for sandbox container."""
         env = {
             "WORKSPACE": "/workspace",
             "CLAUDE_DIR": "/app/claude",
             "SANDBOX_API_KEY": api_key,
+            "USERNAME": username,
         }
         # Pass through Anthropic credentials from host environment
         for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
@@ -200,13 +204,19 @@ class SandboxService:
             env["ANTHROPIC_MODEL"] = model
         return env
 
-    def _build_volumes(self, workspace_dir: str, data_dir: str) -> dict:
-        """Build volume mounts for sandbox container."""
-        # Mount entire user home directory to /workspace for 1:1 user-sandbox model
-        user_home = os.path.dirname(os.path.dirname(workspace_dir))  # e.g., /root/claudeagent/users/{user_id}
+    def _build_volumes(self, workspace_dir: str, data_dir: str, sessions_dir: str, user_home: str) -> dict:
+        """Build volume mounts for sandbox container (方案A: 分别挂载各个目录)."""
+        # 方案A: 分别挂载各个目录，更安全
+        # - /workspace: 用户工作区 (读写)
+        # - /data: 应用数据 (只读)
+        # - /app/claude: Claude配置 (读写)
+        # - /sessions: 会话历史 (读写)
 
         volumes = {
-            user_home: {"bind": "/workspace", "mode": "rw"},
+            workspace_dir: {"bind": "/workspace", "mode": "rw"},
+            data_dir: {"bind": "/data", "mode": "ro"},
+            f"{user_home}/.claude": {"bind": "/app/claude", "mode": "rw"},
+            sessions_dir: {"bind": "/sessions", "mode": "rw"},
         }
 
         # Also mount shared data as read-only if exists
@@ -229,7 +239,7 @@ class SandboxService:
     def create_sandbox(self, sandbox_id: str, user_id: str, name: str, username: str = "") -> SandboxInfo:
         """Create a new sandbox with Docker container."""
         # 1. Create user directories
-        workspace_dir, data_dir = self._ensure_user_dirs(user_id, name)
+        workspace_dir, data_dir, sessions_dir, user_home = self._ensure_user_dirs(user_id, name)
 
         # 2. Allocate host port
         host_port = self.port_allocator.allocate(sandbox_id)
@@ -255,8 +265,8 @@ class SandboxService:
                 except docker.errors.NotFound:
                     pass
 
-                env = self._build_env(api_key)
-                volumes = self._build_volumes(workspace_dir, data_dir)
+                env = self._build_env(api_key, username)
+                volumes = self._build_volumes(workspace_dir, data_dir, sessions_dir, user_home)
                 device_requests = self._build_device_requests()
 
                 run_kwargs = {

@@ -47,10 +47,12 @@ TARGET="${1:-all}"
 # Force official PyPI (override pip.conf)
 PIP_INDEX_URL="https://pypi.org/simple"
 PIP_TRUSTED_HOST="pypi.org"
-PIP_EXTRA_ARGS="--index-url=${PIP_INDEX_URL} --trusted-host=${PIP_TRUSTED_HOST}"
+# Use --no-cache-dir to ignore user/system pip.conf
+PIP_EXTRA_ARGS="--no-cache-dir --index-url=${PIP_INDEX_URL} --trusted-host=${PIP_TRUSTED_HOST}"
 
-# Python version for wheel downloads
-PYTHON_VERSION="3.12"
+# Python version for wheel downloads (pip format: 12 for cp312)
+PYTHON_VERSION_MAJOR="3.12"
+PYTHON_VERSION_PIP="12"
 
 ############################################
 # 1. Download pip wheels
@@ -58,14 +60,27 @@ PYTHON_VERSION="3.12"
 download_pip_wheels() {
     log "=== Downloading pip wheels ==="
 
+    local PIP_DIR="${OFFLINE_DIR}/python/cp312/any"
+    mkdir -p "$PIP_DIR"
+
+    # Check existing wheels (if > 50, assume already downloaded)
+    local EXISTING_COUNT
+    EXISTING_COUNT=$(ls "${PIP_DIR}"/*.whl 2>/dev/null | wc -l)
+    log "[pip] Existing wheels: $EXISTING_COUNT"
+
+    if [[ "$EXISTING_COUNT" -gt 50 ]]; then
+        log "[pip] Already have $EXISTING_COUNT wheels, skipping download"
+        return
+    fi
+
     # Main container wheels
     log "[pip] Downloading main container wheels..."
     pip download \
         -r "${SCRIPT_DIR}/requirements.txt" \
-        -d "${OFFLINE_DIR}/python/cp312/any" \
+        -d "${PIP_DIR}" \
         --platform manylinux2014_x86_64 \
         --platform manylinux_2_17_x86_64 \
-        --python-version ${PYTHON_VERSION} \
+        --python-version ${PYTHON_VERSION_PIP} \
         --only-binary=:all: \
         ${PIP_EXTRA_ARGS} \
         2>&1 || {
@@ -73,31 +88,31 @@ download_pip_wheels() {
         log "[pip] Binary-only download incomplete, trying with source packages..."
         pip download \
             -r "${SCRIPT_DIR}/requirements.txt" \
-            -d "${OFFLINE_DIR}/python/cp312/any" \
+            -d "${PIP_DIR}" \
             ${PIP_EXTRA_ARGS} \
             2>&1
     }
-    log "[pip] Main wheels: $(ls "${OFFLINE_DIR}/python/cp312/any/" | wc -l) files"
+    log "[pip] Main wheels: $(ls "${PIP_DIR}" | wc -l) files"
 
     # Sandbox container wheels (use same cp312/any for simplicity)
     log "[pip] Downloading sandbox container wheels..."
     pip download \
         -r "${SCRIPT_DIR}/sandbox-requirements.txt" \
-        -d "${OFFLINE_DIR}/python/cp312/any" \
+        -d "${PIP_DIR}" \
         --platform manylinux2014_x86_64 \
         --platform manylinux_2_17_x86_64 \
-        --python-version ${PYTHON_VERSION} \
+        --python-version ${PYTHON_VERSION_PIP} \
         --only-binary=:all: \
         ${PIP_EXTRA_ARGS} \
         2>&1 || {
         log "[pip] Binary-only download incomplete, trying with source packages..."
         pip download \
             -r "${SCRIPT_DIR}/sandbox-requirements.txt" \
-            -d "${OFFLINE_DIR}/python/cp312/any" \
+            -d "${PIP_DIR}" \
             ${PIP_EXTRA_ARGS} \
             2>&1
     }
-    log "[pip] Sandbox wheels: $(ls "${OFFLINE_DIR}/python/cp312/any/" | wc -l) files"
+    log "[pip] Sandbox wheels: $(ls "${PIP_DIR}" | wc -l) files"
 
     log "=== pip wheels download complete ==="
 }
@@ -122,24 +137,32 @@ download_apt_packages() {
     # Deduplicate
     ALL_PACKAGES=$(echo "$ALL_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ')
 
-    log "[apt] Downloading packages: $ALL_PACKAGES"
+    # Check existing packages
+    local EXISTING_COUNT=$(ls "${DEB_DIR}"/*.deb 2>/dev/null | wc -l || echo "0")
+    log "[apt] Existing packages: $EXISTING_COUNT"
 
-    docker run --rm ${DOCKER_NET} \
-        -e http_proxy="${PROXY_URL}" \
-        -e https_proxy="${PROXY_URL}" \
-        -e HTTP_PROXY="${PROXY_URL}" \
-        -e HTTPS_PROXY="${PROXY_URL}" \
-        -v "${DEB_DIR}:/output" \
-        python:3.11-slim \
-        bash -c "
-            export DEBIAN_FRONTEND=noninteractive && \
-            apt-get update && \
-            apt-get install -y --download-only --no-install-recommends ${ALL_PACKAGES} && \
-            cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null || true && \
-            echo 'Downloaded APT packages'
-        "
+    if [[ $EXISTING_COUNT -gt 300 ]]; then
+        log "[apt] Already have $EXISTING_COUNT packages, skipping download"
+    else
+        log "[apt] Downloading packages: $ALL_PACKAGES"
 
-    # Generate Packages index for local APT repo
+        docker run --rm ${DOCKER_NET} \
+            -e http_proxy="${PROXY_URL}" \
+            -e https_proxy="${PROXY_URL}" \
+            -e HTTP_PROXY="${PROXY_URL}" \
+            -e HTTPS_PROXY="${PROXY_URL}" \
+            -v "${DEB_DIR}:/output" \
+            python:3.12-slim \
+            bash -c "
+                export DEBIAN_FRONTEND=noninteractive && \
+                apt-get update && \
+                apt-get install -y --download-only --no-install-recommends ${ALL_PACKAGES} && \
+                cp /var/cache/apt/archives/*.deb /output/ 2>/dev/null || true && \
+                echo 'Downloaded APT packages'
+            "
+    fi
+
+    # Generate Packages index for local APT repo (always regenerate)
     log "[apt] Generating APT repo index..."
     cd "${OFFLINE_DIR}/apt"
     if command -v dpkg-scanpackages &>/dev/null; then
@@ -149,7 +172,7 @@ download_apt_packages() {
         # Use Docker container to generate index
         docker run --rm \
             -v "${OFFLINE_DIR}/apt:/repo" \
-            python:3.11-slim \
+            python:3.12-slim \
             bash -c "
                 apt-get update && apt-get install -y dpkg-dev && \
                 cd /repo && \
@@ -174,6 +197,13 @@ download_npm_cache() {
 
     if [[ ! -f "${FRONTEND_DIR}/package.json" ]]; then
         log "[npm] WARN: frontend/claudecodeui/package.json not found, skipping"
+        return
+    fi
+
+    # Check existing npm cache
+    if [[ -f "${NPM_CACHE_DIR}/node_modules.tar.gz" ]]; then
+        local EXISTING_SIZE=$(du -sh "${NPM_CACHE_DIR}/node_modules.tar.gz" 2>/dev/null | cut -f1)
+        log "[npm] Already have cache (${EXISTING_SIZE}), skipping download"
         return
     fi
 
@@ -222,9 +252,29 @@ case "$TARGET" in
         download_npm_cache
         ;;
     all)
-        download_pip_wheels
-        download_apt_packages
-        download_npm_cache
+        # 并行执行3个下载任务
+        log "Starting parallel downloads..."
+        (
+            download_pip_wheels
+        ) &
+        PIP_PID=$!
+
+        (
+            download_apt_packages
+        ) &
+        APT_PID=$!
+
+        (
+            download_npm_cache
+        ) &
+        NPM_PID=$!
+
+        # 等待所有任务完成
+        wait $PIP_PID || true
+        wait $APT_PID || true
+        wait $NPM_PID || true
+
+        log "All parallel downloads completed"
         ;;
     *)
         echo "Usage: $0 [all|pip|apt|npm]"

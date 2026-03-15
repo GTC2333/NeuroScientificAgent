@@ -7,7 +7,7 @@ import os
 import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -86,8 +86,8 @@ class Config:
     project: ProjectConfig
     workspace: WorkspaceConfig
     mcp: MCPConfig
-    auth: AuthConfig = AuthConfig()
-    sandbox: SandboxConfig = SandboxConfig()
+    auth: AuthConfig = field(default_factory=AuthConfig)
+    sandbox: SandboxConfig = field(default_factory=SandboxConfig)
 
 
 def load_config() -> Config:

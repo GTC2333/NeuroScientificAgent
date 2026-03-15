@@ -1,4 +1,4 @@
-import { useSandboxState, SandboxStatus } from '../../hooks/useSandboxState';
+import { useSandboxState, SandboxStatus } from '../../../../hooks/useSandboxState';
 
 function getStatusColor(status: SandboxStatus): string {
   switch (status) {

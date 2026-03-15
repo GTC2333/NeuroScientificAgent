@@ -18,20 +18,20 @@ up:
 
 # Stop main container
 down:
-	docker-compose down
+	docker compose down
 
 # Stop all (main + sandbox containers)
 down-all:
-	docker-compose down
+	docker compose down
 	docker ps --filter "name=mas-sandbox-" -q | xargs -r docker rm -f 2>/dev/null || true
 
 # View logs
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 # Clean up everything
 clean:
-	docker-compose down -v
+	docker compose down -v
 	docker ps --filter "name=mas-sandbox-" -q | xargs -r docker rm -f 2>/dev/null || true
 	docker system prune -f
 

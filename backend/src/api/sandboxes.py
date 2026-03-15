@@ -127,11 +127,12 @@ async def create_sandbox(
     info = service.create_sandbox(sandbox_id, current_user.id, name, username=current_user.username)
 
     # Wait for healthy
-    if info.status == "running" and info.api_url:
+    # Use host_api_url for health check from main container
+    if info.status == "running" and info.host_api_url:
         import asyncio
         loop = asyncio.get_event_loop()
         healthy = await loop.run_in_executor(
-            None, service.wait_for_healthy, info.api_url, 30
+            None, service.wait_for_healthy, info.host_api_url, 30
         )
         if not healthy:
             logger.warning("[sandboxes] Container not healthy after 30s: %s", info.container_name)
@@ -206,11 +207,12 @@ async def rebuild_sandbox(
         raise HTTPException(status_code=500, detail="Rebuild failed")
 
     # Wait for healthy
-    if info.status == "running" and info.api_url:
+    # Use host_api_url for health check from main container
+    if info.status == "running" and info.host_api_url:
         import asyncio
         loop = asyncio.get_event_loop()
         healthy = await loop.run_in_executor(
-            None, service.wait_for_healthy, info.api_url, 30
+            None, service.wait_for_healthy, info.host_api_url, 30
         )
         if not healthy:
             logger.warning("[sandboxes] Rebuilt container not healthy after 30s: %s", info.container_name)

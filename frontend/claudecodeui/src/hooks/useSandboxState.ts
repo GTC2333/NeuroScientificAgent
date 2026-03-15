@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import api from '../utils/api';
+import { api } from '../utils/api';
 
 export type SandboxStatus = 'none' | 'creating' | 'running' | 'stopped' | 'error' | 'rebuilding';
 

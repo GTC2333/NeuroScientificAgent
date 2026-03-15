@@ -271,7 +271,8 @@ async def handle_claude_command(user_id: str, message_data: dict):
         # Check if sandbox has a Docker container API URL
         sandboxes_data = load_sandboxes()
         sandbox_data = sandboxes_data.get(sandbox_id, {})
-        sandbox_api_url = sandbox_data.get("api_url")
+        # Use host_api_url for main container to access sandbox (api_url is for container-internal access)
+        sandbox_api_url = sandbox_data.get("host_api_url")
         sandbox_api_key = sandbox_data.get("api_key", "")
 
         response_text = ""
@@ -380,8 +381,12 @@ async def handle_claude_command(user_id: str, message_data: dict):
             logger.info(f"[ws] Proxy mode complete: {event_count} events received")
 
         else:
-            # ===== LOCAL MODE: Fallback to local execution (dev mode, no Docker) =====
-            logger.info(f"[ws] Local mode: executing via ClaudeSDKService")
+            # ===== LOCAL MODE: Fallback to local execution (dev mode, not recommended for production) =====
+            # NOTE: This path is only used when:
+            # 1. No sandbox is configured for the user
+            # 2. Docker/HTTPX is not available in the main container
+            # For production, always ensure sandbox is running and use Proxy Mode above
+            logger.warning(f"[ws] Local mode: executing via ClaudeSDKService (NOT RECOMMENDED FOR PRODUCTION)")
 
             claude_service = get_claude_service()
 
@@ -636,7 +641,11 @@ class ShellConnection:
             await self._cleanup_proxy()
 
     async def _handle_local_mode(self):
-        """Local mode: run shell directly in main container"""
+        """Local mode: run shell directly in main container (dev mode only)
+
+        WARNING: This is not recommended for production. Use proxy mode to sandbox.
+        This path is only used when no sandbox is configured or available.
+        """
         # This is the original handle() logic moved here
         while True:
             data = await self.websocket.receive_text()
@@ -962,7 +971,8 @@ async def shell_websocket_endpoint(websocket: WebSocket, token: str = Query(defa
 
     if user_sandbox:
         # Use proxy mode
-        sandbox_api_url = user_sandbox.get("api_url")
+        # Use host_api_url for main container to access sandbox (api_url is for container-internal access)
+        sandbox_api_url = user_sandbox.get("host_api_url")
         shell_conn = ShellConnection(websocket, user_id, sandbox_api_url)
     else:
         # Use local mode (for development)
