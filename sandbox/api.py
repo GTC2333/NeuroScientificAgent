@@ -2,22 +2,34 @@
 Sandbox API - HTTP interface for sandbox containers.
 Uses SDK agentic loop (not CLI) for Claude execution.
 Provides SSE streaming for real-time response delivery.
+Also provides WebSocket endpoint for CLI shell execution.
 """
 import asyncio
 import json
 import logging
 import os
+import subprocess
+import select
+import pty
+import fcntl
+import termios
+import struct
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+import socketio
 
 from sandbox.agentic_loop import AgenticLoop
 
+# Create Socket.IO application
+sio = socketio.AsyncServer(async_mode='asyncio')
 app = FastAPI(title="MAS Sandbox API")
+app.mount("/", socketio.ASGIApp(sio))
+
 logger = logging.getLogger("Sandbox.API")
 
 # API Key middleware
@@ -244,3 +256,246 @@ async def write_workspace_file(path: str, request: WriteFileRequest):
         return {"path": path, "size": file_path.stat().st_size}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============== Shell WebSocket Handler ==============
+
+WORKSPACE_DIR = os.environ.get("WORKSPACE", "/workspace")
+SHARED_USERS_DIR = os.environ.get("SHARED_USERS", "/shared_users")
+
+
+class ShellConnection:
+    """Manage a single shell/PTY connection in sandbox"""
+
+    def __init__(self, sid: str):
+        self.sid = sid
+        self.master_fd = None
+        self.process = None
+        self.task = None
+
+    async def handle_init(self, data: dict):
+        """Initialize shell process"""
+        project_path = data.get("projectPath", "/workspace")
+        session_id = data.get("sessionId")
+        provider = data.get("provider", "plain-shell")
+        cols = data.get("cols", 80)
+        rows = data.get("rows", 24)
+        initial_command = data.get("initialCommand")
+        is_plain_shell = data.get("isPlainShell", False)
+
+        logger.info(f"[sandbox-shell] Init: project={project_path}, provider={provider}")
+
+        # Establish workspace symlink
+        await self._setup_workspace(project_path)
+
+        # Build shell command
+        shell_command = self._build_command(
+            provider=provider,
+            project_path="/workspace",
+            session_id=session_id,
+            initial_command=initial_command,
+            is_plain_shell=is_plain_shell
+        )
+
+        # Start PTY
+        self.master_fd, slave_fd = pty.openpty()
+
+        # Set terminal size
+        winsize = struct.pack('HHHH', rows, cols, 0, 0)
+        fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
+
+        # Start process
+        self.process = subprocess.Popen(
+            shell_command,
+            shell=True,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd="/workspace",
+            start_new_session=True,
+            env={**os.environ, "TERM": "xterm-256color"}
+        )
+
+        os.close(slave_fd)
+
+        # Start output reading task
+        self.task = asyncio.create_task(self._read_output())
+
+        logger.info(f"[sandbox-shell] Shell started with PID: {self.process.pid}")
+
+    async def _setup_workspace(self, project_path: str):
+        """Establish workspace directory symlink"""
+        # project_path format: /shared_users/user_123/workspace_A
+
+        if os.path.islink('/workspace'):
+            os.unlink('/workspace')
+
+        # If /workspace has content, backup or clear
+        if os.path.exists('/workspace') and os.listdir('/workspace'):
+            # Simple handling: assume user accepts overwrite
+            import shutil
+            backup_dir = '/workspace.backup'
+            if not os.path.exists(backup_dir):
+                shutil.move('/workspace', backup_dir)
+
+        # Create symlink
+        os.symlink(project_path, '/workspace')
+        logger.info(f"[sandbox-shell] Linked /workspace -> {project_path}")
+
+    def _build_command(self, provider: str, project_path: str, session_id: Optional[str],
+                      initial_command: Optional[str], is_plain_shell: bool) -> str:
+        """Build shell command"""
+        if is_plain_shell:
+            if initial_command:
+                return f'cd "{project_path}" && {initial_command}'
+            return f'cd "{project_path}" && $SHELL'
+
+        if provider == "claude" or provider == "anthropic":
+            if session_id:
+                return f'cd "{project_path}" && claude --resume {session_id} || claude'
+            return f'cd "{project_path}" && claude'
+
+        elif provider == "cursor":
+            if session_id:
+                return f'cd "{project_path}" && cursor-agent --resume="{session_id}"'
+            return f'cd "{project_path}" && cursor-agent'
+
+        elif provider == "codex":
+            if session_id:
+                return f'cd "{project_path}" && codex resume "{session_id}" || codex'
+            return f'cd "{project_path}" && codex'
+
+        elif provider == "gemini":
+            if session_id:
+                return f'cd "{project_path}" && gemini --resume="{session_id}"'
+            return f'cd "{project_path}" && gemini'
+
+        # Default
+        if initial_command:
+            return f'cd "{project_path}" && {initial_command}'
+        return f'cd "{project_path}" && $SHELL'
+
+    async def _read_output(self):
+        """Read PTY output and emit to client"""
+        try:
+            while True:
+                if self.master_fd is None:
+                    break
+
+                ready, _, _ = select.select([self.master_fd], [], [], 0.1)
+
+                if ready:
+                    try:
+                        data = os.read(self.master_fd, 4096)
+                        if data:
+                            await sio.emit('output', {
+                                "type": "output",
+                                "data": data.decode("utf-8", errors="replace")
+                            }, room=self.sid)
+                    except OSError:
+                        break
+
+                if self.process and self.process.poll() is not None:
+                    exit_code = self.process.returncode
+                    await sio.emit('output', {
+                        "type": "output",
+                        "data": f"\r\nProcess exited with code {exit_code}\r\n"
+                    }, room=self.sid)
+                    break
+
+                await asyncio.sleep(0.01)
+
+        except Exception as e:
+            logger.error(f"[sandbox-shell] Error reading output: {e}")
+        finally:
+            await self.cleanup()
+
+    async def handle_input(self, data: dict):
+        """Forward input to PTY"""
+        input_data = data.get("data", "")
+        if self.master_fd and input_data:
+            try:
+                os.write(self.master_fd, input_data.encode("utf-8"))
+            except OSError as e:
+                logger.error(f"[sandbox-shell] Error writing input: {e}")
+
+    async def handle_resize(self, data: dict):
+        """Handle terminal resize"""
+        if self.master_fd:
+            cols = data.get("cols", 80)
+            rows = data.get("rows", 24)
+            try:
+                winsize = struct.pack('HHHH', rows, cols, 0, 0)
+                fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
+            except Exception as e:
+                logger.error(f"[sandbox-shell] Error resizing: {e}")
+
+    async def cleanup(self):
+        """Clean up resources"""
+        if self.master_fd:
+            try:
+                os.close(self.master_fd)
+            except:
+                pass
+            self.master_fd = None
+
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=2)
+            except:
+                try:
+                    self.process.kill()
+                except:
+                    pass
+            self.process = None
+
+
+# Store active shell connections
+shell_connections: Dict[str, ShellConnection] = {}
+
+
+@sio.event
+async def connect(sid, environ):
+    """Client connection"""
+    logger.info(f"[sandbox-shell] Client connected: {sid}")
+
+
+@sio.event
+async def disconnect(sid):
+    """Client disconnect"""
+    logger.info(f"[sandbox-shell] Client disconnected: {sid}")
+    if sid in shell_connections:
+        await shell_connections[sid].cleanup()
+        del shell_connections[sid]
+
+
+@sio.event
+async def init(sid, data):
+    """Handle init message"""
+    shell_conn = ShellConnection(sid)
+    shell_connections[sid] = shell_conn
+    await shell_conn.handle_init(data)
+
+
+@sio.event
+async def input(sid, data):
+    """Handle input message"""
+    if sid in shell_connections:
+        await shell_connections[sid].handle_input(data)
+
+
+@sio.event
+async def resize(sid, data):
+    """Handle resize message"""
+    if sid in shell_connections:
+        await shell_connections[sid].handle_resize(data)
+
+
+@sio.event
+async def disconnect_shell(sid):
+    """Handle disconnect"""
+    if sid in shell_connections:
+        await shell_connections[sid].cleanup()
+        del shell_connections[sid]
+

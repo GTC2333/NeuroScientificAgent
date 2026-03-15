@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Main Container - Nginx + Backend API + Docker Sandbox Manager
   main:
@@ -25,6 +23,8 @@ services:
       - ${USERS_DIR:-/root/claudeagent/users}:/root/claudeagent/users
       # 挂载统一离线依赖库
       - ${OFFLINE_DEPS_PATH:-/opt/offline-deps}:/opt/offline-deps:ro
+      # 共享用户目录给沙盒 CLI
+      - ${USERS_DIR:-/root/claudeagent/users}:/shared_users:ro
     networks:
       - mas-network
     restart: unless-stopped

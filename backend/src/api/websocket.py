@@ -604,11 +604,13 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(default=""
 # ============ Shell WebSocket Endpoint ============
 
 class ShellConnection:
-    """Manage a single shell/PTY connection"""
+    """Manage a single shell/PTY connection - supports proxy mode to sandbox"""
 
-    def __init__(self, websocket: WebSocket, user_id: str):
+    def __init__(self, websocket: WebSocket, user_id: str, sandbox_api_url: str = None):
         self.websocket = websocket
         self.user_id = user_id
+        self.sandbox_api_url = sandbox_api_url  # New: sandbox API URL for proxy mode
+        self.sio_client = None  # New: socketio client for proxy mode
         self.master_fd = None
         self.process = None
         self.task = None
@@ -619,6 +621,59 @@ class ShellConnection:
             await self.websocket.accept()
             logger.info(f"[shell] User {self.user_id} connected")
 
+            if self.sandbox_api_url:
+                # Proxy mode: forward to sandbox
+                await self._handle_proxy_mode()
+            else:
+                # Local mode (for development)
+                await self._handle_local_mode()
+
+        except WebSocketDisconnect:
+            logger.info(f"[shell] User {self.user_id} disconnected")
+        except Exception as e:
+            logger.error(f"[shell] Error: {e}", exc_info=True)
+        finally:
+            await self._cleanup_proxy()
+
+    async def _handle_local_mode(self):
+        """Local mode: run shell directly in main container"""
+        # This is the original handle() logic moved here
+        while True:
+            data = await self.websocket.receive_text()
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+
+            msg_type = message.get("type", "")
+            logger.info(f"[shell] Received: {msg_type}")
+
+            if msg_type == "init":
+                await self.handle_init(message)
+            elif msg_type == "input":
+                self.handle_input(message)
+            elif msg_type == "resize":
+                self.handle_resize(message)
+            elif msg_type == "disconnect":
+                break
+
+    async def _handle_proxy_mode(self):
+        """Proxy mode: forward to sandbox container"""
+        import socketio
+
+        self.sio_client = socketio.AsyncClient()
+
+        try:
+            # Connect to sandbox WebSocket
+            ws_url = self.sandbox_api_url.replace('http://', '').replace('https://', '')
+            await self.sio_client.connect(f"http://{ws_url}/socket.io")
+
+            logger.info(f"[shell] Connected to sandbox: {self.sandbox_api_url}")
+
+            # Create receive task
+            receive_task = asyncio.create_task(self._proxy_receive())
+            init_sent = False
+
             while True:
                 data = await self.websocket.receive_text()
                 try:
@@ -627,23 +682,57 @@ class ShellConnection:
                     continue
 
                 msg_type = message.get("type", "")
-                logger.info(f"[shell] Received: {msg_type}")
 
                 if msg_type == "init":
-                    await self.handle_init(message)
+                    # First: forward to sandbox
+                    await self.sio_client.emit('init', message)
+                    init_sent = True
                 elif msg_type == "input":
-                    self.handle_input(message)
+                    if init_sent:
+                        await self.sio_client.emit('input', message)
                 elif msg_type == "resize":
-                    self.handle_resize(message)
+                    if init_sent:
+                        await self.sio_client.emit('resize', message)
                 elif msg_type == "disconnect":
+                    if init_sent:
+                        await self.sio_client.emit('disconnect_shell')
                     break
 
-        except WebSocketDisconnect:
-            logger.info(f"[shell] User {self.user_id} disconnected")
+            receive_task.cancel()
+
         except Exception as e:
-            logger.error(f"[shell] Error: {e}", exc_info=True)
+            logger.error(f"[shell] Proxy error: {e}")
+            await self.websocket.send_json({
+                "type": "error",
+                "error": f"Proxy error: {str(e)}"
+            })
         finally:
-            self.cleanup()
+            await self._cleanup_proxy()
+
+    async def _proxy_receive(self):
+        """Receive sandbox output and forward to frontend"""
+        @self.sio_client.on('output')
+        async def on_output(data):
+            await self.websocket.send_json(data)
+
+        @self.sio_client.on('error')
+        async def on_error(data):
+            await self.websocket.send_json({
+                "type": "error",
+                "error": data.get('error', 'Unknown error')
+            })
+
+        # Keep connection alive
+        await asyncio.sleep(3600)
+
+    async def _cleanup_proxy(self):
+        """Cleanup proxy connection"""
+        if self.sio_client:
+            try:
+                await self.sio_client.disconnect()
+            except:
+                pass
+            self.sio_client = None
 
     async def handle_init(self, message: dict):
         """Initialize shell process"""
@@ -851,6 +940,7 @@ async def shell_websocket_endpoint(websocket: WebSocket, token: str = Query(defa
     """WebSocket endpoint for shell/terminal connections.
 
     Frontend connects to /shell?token=JWT and sends init/input/resize messages.
+    Supports proxy mode to sandbox container.
     """
     # Authenticate via token query param
     user = authenticate_ws_token(token)
@@ -861,5 +951,21 @@ async def shell_websocket_endpoint(websocket: WebSocket, token: str = Query(defa
         return
 
     user_id = user["id"]
-    shell_conn = ShellConnection(websocket, user_id)
+
+    # Check if user has a running sandbox
+    sandboxes = load_sandboxes()
+    user_sandbox = None
+    for sandbox_id, sandbox in sandboxes.items():
+        if sandbox.get("user_id") == user_id and sandbox.get("status") == "running":
+            user_sandbox = sandbox
+            break
+
+    if user_sandbox:
+        # Use proxy mode
+        sandbox_api_url = user_sandbox.get("api_url")
+        shell_conn = ShellConnection(websocket, user_id, sandbox_api_url)
+    else:
+        # Use local mode (for development)
+        shell_conn = ShellConnection(websocket, user_id, None)
+
     await shell_conn.handle()

@@ -19,8 +19,11 @@ WORKDIR /app
 
 # Install system dependencies (one-shot: update + install)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl git ripgrep \
+    curl git ripgrep python3-ptyprocess \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI
+RUN curl -sSfL https://raw.githubusercontent.com/anthropics/claude-code/main/install.sh | sh
 
 # Copy offline pip wheels (if available)
 COPY docker/offline-deps/pip-wheels/sandbox/ /tmp/pip-wheels/
