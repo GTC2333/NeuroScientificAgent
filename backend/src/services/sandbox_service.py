@@ -202,13 +202,14 @@ class SandboxService:
 
     def _build_volumes(self, workspace_dir: str, data_dir: str) -> dict:
         """Build volume mounts for sandbox container."""
+        # Mount entire user home directory to /workspace for 1:1 user-sandbox model
+        user_home = os.path.dirname(os.path.dirname(workspace_dir))  # e.g., /root/claudeagent/users/{user_id}
+
         volumes = {
-            workspace_dir: {"bind": "/workspace", "mode": "rw"},
+            user_home: {"bind": "/workspace", "mode": "rw"},
         }
-        # User data directory (read-only)
-        if Path(data_dir).exists():
-            volumes[data_dir] = {"bind": "/data", "mode": "ro"}
-        # Global shared data (read-only)
+
+        # Also mount shared data as read-only if exists
         shared = Path(self.config.shared_data_dir)
         if shared.exists():
             volumes[str(shared)] = {"bind": "/shared", "mode": "ro"}

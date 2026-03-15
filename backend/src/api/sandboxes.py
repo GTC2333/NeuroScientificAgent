@@ -247,3 +247,42 @@ async def stop_sandbox(
         raise HTTPException(status_code=403, detail="Access denied")
     service.stop_sandbox(sandbox_id)
     return {"status": "stopped"}
+
+
+# ============== Username-based sandbox endpoints ==============
+
+@router.get("/sandboxes/by-username/{username}", response_model=SandboxResponse)
+async def get_sandbox_by_username(
+    username: str,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Get sandbox by username"""
+    sandboxes = load_sandboxes()
+    for sandbox_id, sandbox in sandboxes.items():
+        if sandbox.get("username") == username:
+            return _to_response(SandboxInfo.from_dict(sandbox))
+    raise HTTPException(status_code=404, detail="Sandbox not found")
+
+
+@router.post("/sandboxes/create-for-user", response_model=SandboxResponse)
+async def create_sandbox_for_current_user(
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Create sandbox for current user (called on first login)"""
+    import uuid
+
+    # Check if sandbox already exists
+    sandboxes = load_sandboxes()
+    for sb in sandboxes.values():
+        if sb.get("user_id") == current_user.id:
+            return _to_response(SandboxInfo.from_dict(sb))
+
+    # Create new sandbox
+    service = get_sandbox_service()
+    info = service.create_sandbox(
+        sandbox_id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        name=current_user.username,
+        username=current_user.username
+    )
+    return _to_response(info)

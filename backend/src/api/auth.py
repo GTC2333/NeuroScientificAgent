@@ -224,6 +224,33 @@ async def login(user: UserLogin):
     # Create token
     access_token = create_access_token(data={"sub": user.username})
 
+    # Check and create user sandbox if not exists
+    from src.api.sandboxes import load_sandboxes
+    sandboxes = load_sandboxes()
+    user_sandbox = None
+
+    for sb in sandboxes.values():
+        if sb.get("user_id") == user_data["id"]:
+            user_sandbox = sb
+            break
+
+    if not user_sandbox:
+        # Auto-create sandbox for user
+        try:
+            from src.services.sandbox_service import get_sandbox_service
+            import uuid
+            service = get_sandbox_service()
+            info = service.create_sandbox(
+                sandbox_id=str(uuid.uuid4()),
+                user_id=user_data["id"],
+                name=user_data["username"],
+                username=user_data["username"]
+            )
+            user_sandbox = info.to_dict()
+            logger.info(f"[auth] Auto-created sandbox for user: {user.username}")
+        except Exception as e:
+            logger.warning(f"[auth] Failed to create sandbox for user {user.username}: {e}")
+
     return TokenResponse(
         access_token=access_token,
         user=UserResponse(
