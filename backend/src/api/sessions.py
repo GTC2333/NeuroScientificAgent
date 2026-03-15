@@ -21,7 +21,7 @@ router = APIRouter()
 # ============ Models ============
 
 class SessionCreate(BaseModel):
-    sandboxId: str
+    sandboxId: Optional[str] = None  # Optional - auto-associate if not provided
     title: Optional[str] = "New Chat"
     agents: List[str] = ["principal"]
     skills: List[str] = []
@@ -94,16 +94,36 @@ async def create_session(
     data: SessionCreate,
     current_user: UserResponse = Depends(get_current_user),
 ):
-    """Create a new session within a sandbox"""
-    if not _user_owns_sandbox(data.sandboxId, current_user.id):
-        raise HTTPException(status_code=403, detail="Access denied to sandbox")
+    """Create a new session within a sandbox.
+
+    If sandboxId is not provided, automatically associates with user's default sandbox.
+    """
+    # Auto-associate with user's sandbox if not provided
+    sandbox_id = data.sandboxId
+    if not sandbox_id:
+        sandboxes = load_sandboxes()
+        user_sandboxes = [
+            s for s in sandboxes.values()
+            if s["user_id"] == current_user.id
+        ]
+        if not user_sandboxes:
+            raise HTTPException(
+                status_code=403,
+                detail="No sandbox found. Please create a workspace first."
+            )
+        # Use the first (and only) sandbox
+        sandbox_id = user_sandboxes[0]["id"]
+    else:
+        # Verify ownership if sandboxId is provided
+        if not _user_owns_sandbox(sandbox_id, current_user.id):
+            raise HTTPException(status_code=403, detail="Access denied to sandbox")
 
     session_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
 
     session = {
         "id": session_id,
-        "sandboxId": data.sandboxId,
+        "sandboxId": sandbox_id,
         "title": data.title or "New Chat",
         "agents": data.agents,
         "skills": data.skills,
@@ -116,7 +136,7 @@ async def create_session(
     sessions[session_id] = session
     save_sessions(sessions)
 
-    logger.info(f"[sessions] Created session {session_id} in sandbox {data.sandboxId}")
+    logger.info(f"[sessions] Created session {session_id} in sandbox {sandbox_id}")
     return SessionResponse(**session)
 
 
