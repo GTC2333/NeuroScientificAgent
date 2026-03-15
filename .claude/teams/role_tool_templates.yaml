@@ -1,0 +1,54 @@
+# Role/Tool templates for SDK subagents (used by claudecodeui server)
+#
+# Required top-level keys:
+# - toolTemplates
+# - roles
+# - defaults.cwd
+
+version: "1"
+
+defaults:
+  cwd: /root/claudeagent/scientific_agent/temp_workspace
+  model: claude-sonnet-4-20250514
+
+toolTemplates:
+  readonly:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+
+  standard:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      - Edit
+      - Write
+      - Bash
+
+roles:
+  principal:
+    description: Team lead; coordinates subagents and integrates results
+    model: claude-sonnet-4-20250514
+    toolTemplateRefs: [standard]
+
+  theorist:
+    description: Hypothesis generation and high-level reasoning (read-only)
+    model: claude-sonnet-4-20250514
+    toolTemplateRefs: [readonly]
+
+  experimentalist:
+    description: Experiment design and implementation
+    model: claude-sonnet-4-20250514
+    toolTemplateRefs: [standard]
+
+  analyst:
+    description: Data analysis and validation
+    model: claude-sonnet-4-20250514
+    toolTemplateRefs: [standard]
+
+  writer:
+    description: Reporting and synthesis (read-only)
+    model: claude-sonnet-4-20250514
+    toolTemplateRefs: [readonly]

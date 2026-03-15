@@ -36,7 +36,8 @@
     "release": "./release.sh",
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/fix-node-pty.js",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test": "node --test"
   },
   "keywords": [
     "claude code",
@@ -103,7 +104,8 @@
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7",
     "tailwind-merge": "^3.3.1",
-    "ws": "^8.14.2"
+    "ws": "^8.14.2",
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.4.3",
