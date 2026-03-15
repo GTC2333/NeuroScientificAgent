@@ -405,18 +405,84 @@ export function useProjectsState({
     [activeTab, isMobile, navigate, selectedProject?.name],
   );
 
-  const handleNewSession = useCallback(
-    (project: Project) => {
-      setSelectedProject(project);
-      setSelectedSession(null);
-      setActiveTab('chat');
-      navigate('/');
+  // Create session immediately via API
+  const createSessionImmediate = useCallback(async (title?: string) => {
+    try {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
+        },
+        body: JSON.stringify({
+          title: title || 'New Chat',
+          agents: ['principal'],
+          skills: [],
+        }),
+      });
 
-      if (isMobile) {
-        setSidebarOpen(false);
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error('请先创建工作空间');
+        }
+        throw new Error('Failed to create session');
+      }
+
+      const session = await response.json();
+      return session;
+    } catch (error) {
+      console.error('Error creating session:', error);
+      throw error;
+    }
+  }, []);
+
+  const handleNewSession = useCallback(
+    async (project: Project) => {
+      try {
+        // Create session immediately
+        const newSession = await createSessionImmediate();
+
+        // Update projects state to include new session
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.name === project.name
+              ? {
+                  ...p,
+                  sessions: [
+                    {
+                      id: newSession.id,
+                      title: newSession.title,
+                      createdAt: newSession.createdAt,
+                      updatedAt: newSession.updatedAt,
+                    },
+                    ...(p.sessions || []),
+                  ],
+                }
+              : p
+          )
+        );
+
+        // Select the new session
+        setSelectedProject(project);
+        setSelectedSession({
+          id: newSession.id,
+          title: newSession.title,
+          createdAt: newSession.createdAt,
+          updatedAt: newSession.updatedAt,
+        });
+        setActiveTab('chat');
+        navigate(`/session/${newSession.id}`);
+
+        if (isMobile) {
+          setSidebarOpen(false);
+        }
+      } catch (error) {
+        console.error('Failed to create session:', error);
+        // Show error toast or handle gracefully
+        alert('无法创建会话: ' + (error instanceof Error ? error.message : '请先创建工作空间'));
       }
     },
-    [isMobile, navigate],
+    [createSessionImmediate, isMobile, navigate],
   );
 
   const handleSessionDelete = useCallback(

@@ -74,68 +74,24 @@ class CreateWorkspacePayload(BaseModel):
     path: str
 
 
+# NOTE: 此端点已禁用 - 项目/沙盒由系统自动管理
+# 沙盒创建逻辑在其他地方实现（sandbox_service）
+# Disabled: Project creation is now system-managed
 @router.post("/projects/create-workspace")
 async def create_workspace(
     payload: CreateWorkspacePayload,
     current_user: UserResponse = Depends(get_current_user)
 ):
-    """Create a new workspace (sandbox)"""
-    import uuid
-    from datetime import datetime
-    from src.api.sandboxes import (
-        get_workspaces_base, get_next_port, save_sandboxes,
-        get_sandboxes_path, BASE_PORT
+    """Create a new workspace (sandbox)
+
+    ⚠️ DEPRECATED: 此功能已禁用
+    沙盒由系统在其他地方自动创建，用户无需手动创建项目
+    """
+    # Return error message
+    raise HTTPException(
+        status_code=403,
+        detail="项目由系统自动管理，无法手动创建"
     )
-    import shutil
-
-    # Extract workspace name from path (e.g., "myproject" from "/path/to/myproject")
-    workspace_path = Path(payload.path)
-    workspace_name = workspace_path.name if workspace_path.name else f"workspace-{uuid.uuid4().hex[:8]}"
-
-    # Generate sandbox details
-    sandbox_id = str(uuid.uuid4())
-    port = get_next_port()
-
-    # Create workspace directory
-    workspaces_base = get_workspaces_base()
-    user_workspace = workspaces_base / current_user.id / workspace_name
-    user_workspace.mkdir(parents=True, exist_ok=True)
-
-    # Copy .claude directory if exists
-    project_root = user_workspace.parent.parent.parent.parent
-    project_claude_dir = project_root / "claude"
-    if project_claude_dir.exists():
-        workspace_claude = user_workspace / ".claude"
-        if not workspace_claude.exists():
-            shutil.copytree(project_claude_dir, workspace_claude, dirs_exist_ok=True)
-
-    # Load existing sandboxes and add new one
-    sandboxes = load_sandboxes()
-
-    sandbox = {
-        "id": sandbox_id,
-        "user_id": current_user.id,
-        "name": workspace_name,
-        "port": port,
-        "workspace_path": str(user_workspace),
-        "status": "running",
-        "created_at": datetime.utcnow().isoformat()
-    }
-
-    sandboxes[sandbox_id] = sandbox
-    save_sandboxes(sandboxes)
-
-    logger.info(f"[projects] Created workspace '{workspace_name}' for user {current_user.username}")
-
-    # Return project in the format expected by frontend
-    return {
-        "project": {
-            "name": sandbox_id,
-            "displayName": workspace_name,
-            "fullPath": str(user_workspace),
-            "sessions": []
-        }
-    }
 
 
 @router.get("/projects/{project_id}")
@@ -278,49 +234,23 @@ async def delete_project_session(
     return {"status": "ok", "message": "Session deleted"}
 
 
+# NOTE: 此端点已禁用 - 项目由系统自动管理
+# Disabled: Project deletion is now system-managed
 @router.delete("/projects/{project_id}")
 async def delete_project(
     project_id: str,
     force: bool = False,
-    current_user: UserResponse = Depends(get_current_user),
+    current_user: UserResponse = Depends(get_current_user)
 ):
-    """Delete a project (sandbox) and all its sessions"""
-    from src.api.sandboxes import save_sandboxes, save_sessions
-    import shutil
+    """Delete a project (sandbox) and all its sessions
 
-    sandboxes = load_sandboxes()
-    sandbox = sandboxes.get(project_id)
-
-    if not sandbox:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if sandbox["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    # Delete all sessions in this sandbox
-    sessions = load_sessions()
-    session_ids_to_delete = [
-        sid for sid, session in sessions.items()
-        if _normalize_session(dict(session)).get("sandboxId") == project_id
-    ]
-
-    for session_id in session_ids_to_delete:
-        del sessions[session_id]
-
-    save_sessions(sessions)
-
-    # Delete workspace directory if force=true
-    if force:
-        workspace_path = Path(sandbox["workspace_path"])
-        if workspace_path.exists():
-            shutil.rmtree(workspace_path)
-            logger.info(f"[projects] Deleted workspace directory {workspace_path}")
-
-    # Delete the sandbox
-    del sandboxes[project_id]
-    save_sandboxes(sandboxes)
-
-    logger.info(f"[projects] Deleted project {project_id} (force={force})")
-    return {"status": "ok", "message": "Project deleted"}
+    ⚠️ DEPRECATED: 此功能已禁用
+    项目/沙盒由系统自动管理，用户无法删除
+    """
+    raise HTTPException(
+        status_code=403,
+        detail="项目由系统自动管理，无法手动删除"
+    )
 
 
 @router.get("/projects/{project_id}/files")

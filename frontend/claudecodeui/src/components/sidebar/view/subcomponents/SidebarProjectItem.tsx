@@ -281,11 +281,8 @@ export default function SidebarProjectItem({
           onClick={selectAndToggleProject}
         >
           <div className="flex min-w-0 flex-1 items-center gap-3">
-            {isExpanded ? (
-              <FolderOpen className="h-4 w-4 flex-shrink-0 text-primary" />
-            ) : (
-              <Folder className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-            )}
+            {/* Always expanded - show FolderOpen */}
+            <FolderOpen className="h-4 w-4 flex-shrink-0 text-primary" />
             <div className="min-w-0 flex-1 text-left">
               {isEditing ? (
                 <div className="space-y-1">
@@ -372,31 +369,22 @@ export default function SidebarProjectItem({
                     )}
                   />
                 </div>
+                {/* Disabled: 项目由系统自动管理，无法编辑 */}
                 <div
-                  className="touch:opacity-100 flex h-6 w-6 cursor-pointer items-center justify-center rounded opacity-0 transition-all duration-200 hover:bg-accent group-hover:opacity-100"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onStartEditingProject(project);
-                  }}
-                  title={t('tooltips.renameProject')}
+                  className="touch:opacity-100 flex h-6 w-6 cursor-not-allowed items-center justify-center rounded opacity-50 transition-all duration-200 group-hover:opacity-50"
+                  title="项目由系统自动管理，无法编辑"
                 >
                   <Edit3 className="h-3 w-3" />
                 </div>
+                {/* Disabled: 项目由系统自动管理，无法删除 */}
                 <div
-                  className="touch:opacity-100 flex h-6 w-6 cursor-pointer items-center justify-center rounded opacity-0 transition-all duration-200 hover:bg-red-50 group-hover:opacity-100 dark:hover:bg-red-900/20"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDeleteProject(project);
-                  }}
-                  title={t('tooltips.deleteProject')}
+                  className="touch:opacity-100 flex h-6 w-6 cursor-not-allowed items-center justify-center rounded opacity-50 transition-all duration-200 group-hover:opacity-50"
+                  title="项目由系统自动管理，无法删除"
                 >
-                  <Trash2 className="h-3 w-3 text-red-600 dark:text-red-400" />
+                  <Trash2 className="h-3 w-3" />
                 </div>
-                {isExpanded ? (
-                  <ChevronDown className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
-                )}
+                {/* Always expanded - project cannot be collapsed */}
+                <ChevronDown className="h-4 w-4 text-muted-foreground/30" />
               </>
             )}
           </div>
